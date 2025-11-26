@@ -7,6 +7,8 @@ MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal v
 2. Click the reagent bottle buddies in order. Hold on the slide during the Decolorizer step; release in the green zone.
 3. Finish with safranin, jump to the microscope, and check your per-cell score.
 
+> Looking for the “real game” plan instead of the current prototype? See [`DESIGN.md`](./DESIGN.md) for a step-by-step breakdown of how to turn each protocol step into a skill-based mini-game (smear grid, heat-fix thermometer, live decolor fade, interpretation scoring, and more).
+
 ## What's included
 - **Plushy MicroBuddy cells:** mixed cocci and rods every slide, safety eyes, soft highlights, and scope-ready shading.
 - **Bottle buddies UI:** clickable reagent bottles with hover/active states, gating, and completion checkmarks.
