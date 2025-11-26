@@ -26,6 +26,13 @@ const GAUGE_SPEED = 1.6;
 const GAUGE_MIN = 35; // "good" low bound
 const GAUGE_MAX = 75; // "good" high bound
 
+// Crystal violet mini-game tuning
+const CV_GRID_COLS = 16;
+const CV_GRID_ROWS = 5;
+const CV_SOAK_GOAL_SEC = 3; // seconds you should hold once fully flooded
+const CV_RINSE_PROGRESS_GOAL = 100; // arbitrary progress units before rinse is considered complete
+const CV_RINSE_HARSH_TARGET = 6; // higher values = harsher rinse penalty threshold
+
 // ---------- GLOBAL STATE ----------
 
 // Overall state machine walks through: smear prep -> heat-fix -> staining flow -> microscope -> results
@@ -37,6 +44,17 @@ let reagents = [];
 let slide;
 let isPouring = false;
 let decolorGauge = 0;
+
+// Crystal violet mini-game state
+let cvGrid;
+let cvCoverage = 0;
+let cvSoakTime = 0;
+let cvStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
+let cvRinseProgress = 0;
+let cvRinseHarshness = 0;
+let cvTilt = -24; // degrees, negative tilts left for runoff
+let isCvPouring = false;
+let isCvRinsing = false;
 
 // Smear + heat-fix data
 const GRID_COLS = 18;
@@ -66,6 +84,7 @@ function startNewSlide() {
   gameState = "smear";
   isPouring = false;
   decolorGauge = 0;
+  initCrystalStage();
   initSmearGrid();
   heat = 0;
   isHeating = false;
@@ -105,6 +124,10 @@ function draw() {
   } else if (gameState === "heatFix") {
     drawSlideBench();
     drawHeatFixStep();
+    drawStatusBar();
+  } else if (gameState === "crystal") {
+    drawSlideBench();
+    drawCrystalStep();
     drawStatusBar();
   } else if (gameState === "stain" || gameState === "decolor") {
     drawSlideBench();
@@ -208,6 +231,10 @@ function drawStatusBar() {
     msg = "Click and drag to paint an even smear. Avoid thick blobs.";
   } else if (gameState === "heatFix") {
     msg = "Hold on the slide over the flame; stay in the green heat zone.";
+  } else if (gameState === "crystal") {
+    if (cvStage === "flood") msg = "Flood the smear with crystal violet until the outline is solid.";
+    else if (cvStage === "soak") msg = "Keep it covered while the soak timer finishes.";
+    else if (cvStage === "rinse") msg = "Hold to rinse; tilt the slide so water runs off gently.";
   } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
@@ -265,6 +292,14 @@ function initSmearGrid() {
   smearOverload = 0;
 }
 
+function getSlidePaintArea(cols = CV_GRID_COLS, rows = CV_GRID_ROWS) {
+  const x = width / 2 - (width * 0.56) / 2 + 24;
+  const y = height / 2 + 50 - (height * 0.2) / 2 + 12;
+  const cw = (width * 0.56 - 48) / cols;
+  const ch = (height * 0.2 - 24) / rows;
+  return { x, y, cw, ch };
+}
+
 function computeSmearStats() {
   const total = GRID_COLS * GRID_ROWS;
   let covered = 0;
@@ -300,10 +335,7 @@ function drawSmearStep() {
 
 function drawSmearPaint() {
   // smear overlay based on grid thickness
-  let sx = width / 2 - (width * 0.56) / 2 + 24;
-  let sy = height / 2 + 50 - (height * 0.2) / 2 + 12;
-  let cw = (width * 0.56 - 48) / GRID_COLS;
-  let ch = (height * 0.2 - 24) / GRID_ROWS;
+  let area = getSlidePaintArea(GRID_COLS, GRID_ROWS);
 
   noStroke();
   for (let gy = 0; gy < GRID_ROWS; gy++) {
@@ -312,7 +344,7 @@ function drawSmearPaint() {
       if (t > 0) {
         let alpha = constrain(40 + t * 35, 40, 170);
         fill(120, 80, 160, alpha);
-        rect(sx + gx * cw, sy + gy * ch, cw, ch, 4);
+        rect(area.x + gx * area.cw, area.y + gy * area.ch, area.cw, area.ch, 4);
       }
     }
   }
@@ -390,6 +422,221 @@ function updateDecolorGauge() {
   if (gameState === "decolor" && isPouring) {
     decolorGauge = constrain(decolorGauge + GAUGE_SPEED, 0, 100);
   }
+}
+
+// ---------- CRYSTAL VIOLET MINI-GAME ----------
+
+function initCrystalStage() {
+  cvGrid = [];
+  for (let y = 0; y < CV_GRID_ROWS; y++) {
+    cvGrid[y] = [];
+    for (let x = 0; x < CV_GRID_COLS; x++) cvGrid[y][x] = 0;
+  }
+  cvCoverage = 0;
+  cvSoakTime = 0;
+  cvStage = "flood";
+  cvRinseProgress = 0;
+  cvRinseHarshness = 0;
+  cvTilt = -24;
+  isCvPouring = false;
+  isCvRinsing = false;
+}
+
+function drawCrystalStep() {
+  progressCvSoak();
+  drawCrystalOverlay();
+  drawCrystalHUD();
+  drawCrystalPrompts();
+}
+
+function drawCrystalOverlay() {
+  let area = getSlidePaintArea();
+  noStroke();
+  for (let gy = 0; gy < CV_GRID_ROWS; gy++) {
+    for (let gx = 0; gx < CV_GRID_COLS; gx++) {
+      let t = cvGrid?.[gy]?.[gx] ?? 0;
+      if (t > 0) {
+        let alpha = constrain(60 + t * 45, 60, 200);
+        fill(123, 79, 255, alpha);
+        rect(area.x + gx * area.cw, area.y + gy * area.ch, area.cw, area.ch, 5);
+      }
+    }
+  }
+
+  // Outline turns solid when coverage is complete
+  noFill();
+  stroke(cvCoverage >= 0.95 ? COLORS.purple : color(120, 90));
+  strokeWeight(3);
+  rect(area.x - 4, area.y - 4, area.cw * CV_GRID_COLS + 8, area.ch * CV_GRID_ROWS + 8, 10);
+
+  if (cvStage === "soak" || cvStage === "rinse") {
+    drawCvSoakBar();
+  }
+
+  if (cvStage === "rinse") {
+    updateCvRinse();
+    drawCvRinseHUD();
+  }
+}
+
+function drawCvSoakBar() {
+  const barW = 280;
+  const barH = 14;
+  const x = width / 2 - barW / 2;
+  const y = height / 2 + 130;
+  const progress = constrain(cvSoakTime / CV_SOAK_GOAL_SEC, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(x - 2, y - 2, barW + 4, barH + 4, 8);
+
+  fill("#d8c7ff");
+  rect(x, y, barW * progress, barH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(x, y, barW, barH, 8);
+
+  noStroke();
+  fill(40);
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  text("Crystal violet soak", width / 2, y - 6);
+}
+
+function drawCvRinseHUD() {
+  const progressW = 320;
+  const progressH = 14;
+  const px = width / 2 - progressW / 2;
+  const py = height / 2 + 160;
+  const progress = constrain(cvRinseProgress / CV_RINSE_PROGRESS_GOAL, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(px - 2, py - 2, progressW + 4, progressH + 4, 8);
+
+  fill("#a4d0ff");
+  rect(px, py, progressW * progress, progressH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(px, py, progressW, progressH, 8);
+
+  // Tilt arrow
+  const arrowY = height / 2 + 40;
+  const arrowX = width / 2;
+  stroke(40, 200);
+  strokeWeight(3);
+  line(arrowX - 60, arrowY, arrowX + 60, arrowY);
+  push();
+  translate(arrowX, arrowY);
+  rotate(cvTilt);
+  stroke(40);
+  fill("#ffd2a6");
+  triangle(-18, 0, 18, 0, 0, -18);
+  pop();
+
+  noStroke();
+  fill(40);
+  textAlign(CENTER, TOP);
+  textSize(12);
+  text("Tilt with ◀ ▶ to guide rinse runoff", width / 2, arrowY + 12);
+
+  textAlign(CENTER, BOTTOM);
+  textSize(13);
+  const harsh = cvRinseHarshness.toFixed(1);
+  text(`Rinse harshness: ${harsh}   Progress: ${Math.floor(progress * 100)}%`, width / 2, py - 8);
+}
+
+function drawCrystalHUD() {
+  const coveragePct = floor(cvCoverage * 100);
+  const boxW = 360;
+  const boxH = 70;
+  const boxX = width / 2 - boxW / 2;
+  const boxY = height / 2 + 90;
+  fill(0, 0, 0, 45);
+  noStroke();
+  rect(boxX, boxY, boxW, boxH, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  let line1 = `Coverage: ${coveragePct}%`;
+  let line2 = "";
+  if (cvStage === "flood") line2 = "Click/drag to flood the smear.";
+  if (cvStage === "soak") line2 = "Hold coverage until the soak bar fills.";
+  if (cvStage === "rinse") line2 = "Hold to rinse; tilt to keep flow off the smear.";
+  text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
+}
+
+function drawCrystalPrompts() {
+  if (cvStage === "soak" && cvSoakTime >= CV_SOAK_GOAL_SEC) {
+    drawActionButton(width / 2 - 90, height - 120, 180, 38, "Start CV Rinse");
+  } else if (cvStage === "rinse") {
+    if (!isCvRinsing) {
+      drawActionButton(width / 2 - 100, height - 120, 200, 38, "Hold on slide to rinse");
+    }
+    if (cvRinseProgress >= CV_RINSE_PROGRESS_GOAL && !isCvRinsing) {
+      drawActionButton(width / 2 - 90, height - 70, 180, 38, "Finish CV Step");
+    }
+  }
+}
+
+function updateCvRinse() {
+  if (cvStage !== "rinse" || !isCvRinsing) return;
+  const frameScale = deltaTime / 16.67;
+  const tiltSafety = constrain(abs(cvTilt) / 32, 0, 1);
+
+  // More tilt = gentler rinse, flat slide = harsher blast
+  const harshIncrement = (0.35 + (1 - tiltSafety) * 0.9) * frameScale;
+  cvRinseHarshness += harshIncrement;
+
+  const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
+  cvRinseProgress = min(cvRinseProgress + progressIncrement, CV_RINSE_PROGRESS_GOAL);
+}
+
+function paintCrystalAt(mx, my) {
+  let area = getSlidePaintArea();
+  if (mx < area.x || mx > area.x + area.cw * CV_GRID_COLS) return;
+  if (my < area.y || my > area.y + area.ch * CV_GRID_ROWS) return;
+
+  let gx = floor((mx - area.x) / area.cw);
+  let gy = floor((my - area.y) / area.ch);
+  if (gx >= 0 && gx < CV_GRID_COLS && gy >= 0 && gy < CV_GRID_ROWS) {
+    cvGrid[gy][gx] = min(cvGrid[gy][gx] + 1, 6);
+    computeCvCoverage();
+    if (cvCoverage >= 0.95 && cvStage === "flood") {
+      cvStage = "soak";
+    }
+  }
+}
+
+function computeCvCoverage() {
+  let filled = 0;
+  for (let y = 0; y < CV_GRID_ROWS; y++) {
+    for (let x = 0; x < CV_GRID_COLS; x++) {
+      if ((cvGrid?.[y]?.[x] ?? 0) > 0) filled++;
+    }
+  }
+  cvCoverage = filled / (CV_GRID_COLS * CV_GRID_ROWS);
+}
+
+function progressCvSoak() {
+  if (cvStage === "soak" && cvCoverage >= 0.95) {
+    cvSoakTime += deltaTime / 1000;
+    if (cvSoakTime > CV_SOAK_GOAL_SEC * 1.6) {
+      cvStage = "rinse"; // auto-advance if they linger forever
+    }
+  }
+}
+
+function finishCrystalStep() {
+  slide.setCrystalStats(cvCoverage, cvSoakTime, cvRinseHarshness, cvRinseProgress);
+  cvStage = "done";
+  currentStep++;
+  gameState = "stain";
 }
 
 // ---------- MICROSCOPE & RESULTS ----------
@@ -476,6 +723,10 @@ class Slide {
     this.smearCoverage = 1;
     this.smearOverload = 0;
     this.heatLevel = 55;
+    this.cvCoverage = 0;
+    this.cvSoakTime = 0;
+    this.cvRinseHarshness = 0;
+    this.cvRinseProgress = 0;
 
     // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
@@ -527,19 +778,28 @@ class Slide {
     this.heatLevel = level;
   }
 
+  setCrystalStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+    this.cvCoverage = coverage;
+    this.cvSoakTime = soakSeconds;
+    this.cvRinseHarshness = rinseHarshness;
+    this.cvRinseProgress = rinseProgress;
+  }
+
   applyDecolorAndSafranin() {
     // Map gauge to qualitative level 0..1
     let g = decolorGauge / 100;
 
     const smearQuality = constrain(this.smearCoverage - this.smearOverload * 0.5, 0, 1);
     const heatQuality = getHeatQuality(this.heatLevel);
+    const cvBinding = this.getCrystalBindingQuality();
+    const rinseAdequacy = constrain(this.cvRinseProgress / CV_RINSE_PROGRESS_GOAL, 0, 1);
 
     // For each cell, decide final color
     this.correctCount = 0;
     this.aliveCount = 0;
 
     for (let c of this.cells) {
-      const survivalProb = constrain(smearQuality * heatQuality, 0, 1);
+      const survivalProb = constrain(smearQuality * heatQuality * cvBinding - this.cvRinseHarshness * 0.02, 0, 1);
       c.alive = random() < survivalProb;
       if (!c.alive) {
         c.finalColor = null;
@@ -549,7 +809,7 @@ class Slide {
 
       // Jitter per cell so it's not perfectly deterministic
       let jitter = random(-0.08, 0.08);
-      let effective = constrain(g + jitter, 0, 1);
+      let effective = constrain(g + jitter + map(rinseAdequacy, 0, 1, -0.2, 0.05), 0, 1);
 
       if (c.trueGram === "positive") {
         // Gram+: stay purple unless very strong decolorization
@@ -595,7 +855,26 @@ class Slide {
       "Each MicroBuddy has a true Gram type.\n\n" +
       "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
       line + "\n\n" +
+      this.getCrystalNote() +
       `You correctly stained ${this.correctCount} out of ${this.aliveCount || this.cells.length} visible cells on this slide.`;
+  }
+
+  getCrystalBindingQuality() {
+    const coverageFactor = constrain(this.cvCoverage, 0, 1);
+    const soakFactor = constrain(this.cvSoakTime / CV_SOAK_GOAL_SEC, 0, 1);
+    const rinsePenalty = constrain(this.cvRinseHarshness / CV_RINSE_HARSH_TARGET, 0, 1);
+    const baseBinding = constrain(0.35 + 0.4 * coverageFactor + 0.25 * soakFactor, 0, 1);
+    return constrain(baseBinding - rinsePenalty * 0.35, 0.15, 1);
+  }
+
+  getCrystalNote() {
+    const soakText = this.cvSoakTime >= CV_SOAK_GOAL_SEC
+      ? `You soaked crystal violet for ${this.cvSoakTime.toFixed(1)}s.`
+      : `Crystal violet soak was short (${this.cvSoakTime.toFixed(1)}s).`;
+    const rinseText = this.cvRinseHarshness > CV_RINSE_HARSH_TARGET
+      ? "Rinse was harsh and knocked off some cells."
+      : "Gentle rinse kept most cells on the slide.";
+    return `${soakText} ${rinseText}\n\n`;
   }
 }
 
@@ -705,6 +984,25 @@ function mousePressed() {
       finalizeHeatFix();
       return;
     }
+  } else if (gameState === "crystal") {
+    if (cvStage === "soak" && cvSoakTime >= CV_SOAK_GOAL_SEC &&
+        isMouseOverButton(width / 2 - 90, height - 120, 180, 38)) {
+      cvStage = "rinse";
+      return;
+    }
+    if (cvStage === "rinse" && cvRinseProgress >= CV_RINSE_PROGRESS_GOAL &&
+        isMouseOverButton(width / 2 - 90, height - 70, 180, 38)) {
+      finishCrystalStep();
+      return;
+    }
+    if (isMouseOnSlide()) {
+      if (cvStage === "flood" || cvStage === "soak") {
+        isCvPouring = true;
+        paintCrystalAt(mouseX, mouseY);
+      } else if (cvStage === "rinse") {
+        isCvRinsing = true;
+      }
+    }
   } else if (gameState === "stain") {
     // reagent clicks
     for (let r of reagents) {
@@ -743,21 +1041,24 @@ function mouseReleased() {
   if (gameState === "heatFix") {
     isHeating = false;
   }
+  if (gameState === "crystal") {
+    isCvPouring = false;
+    isCvRinsing = false;
+  }
 }
 
 function mouseDragged() {
   if (gameState === "smear" && isMouseOnSlide()) {
-    let sx = width / 2 - (width * 0.56) / 2 + 24;
-    let sy = height / 2 + 50 - (height * 0.2) / 2 + 12;
-    let cw = (width * 0.56 - 48) / GRID_COLS;
-    let ch = (height * 0.2 - 24) / GRID_ROWS;
+    const area = getSlidePaintArea(GRID_COLS, GRID_ROWS);
 
-    let gx = floor((mouseX - sx) / cw);
-    let gy = floor((mouseY - sy) / ch);
+    let gx = floor((mouseX - area.x) / area.cw);
+    let gy = floor((mouseY - area.y) / area.ch);
     if (gx >= 0 && gx < GRID_COLS && gy >= 0 && gy < GRID_ROWS) {
       smearGrid[gy][gx] = min(smearGrid[gy][gx] + 1, 6);
       computeSmearStats();
     }
+  } else if (gameState === "crystal" && isMouseOnSlide() && (cvStage === "flood" || cvStage === "soak") && isCvPouring) {
+    paintCrystalAt(mouseX, mouseY);
   }
 }
 
@@ -765,7 +1066,9 @@ function handleReagentClick(id) {
   let expected = steps[currentStep];
   if (id !== expected) return;
 
-  if (id === "crystal" || id === "iodine") {
+  if (id === "crystal") {
+    gameState = "crystal";
+  } else if (id === "iodine") {
     currentStep++;
   } else if (id === "decolor") {
     gameState = "decolor";
@@ -793,6 +1096,17 @@ function isMouseOnSlide() {
 
 function isMouseOverButton(x, y, w, h) {
   return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+}
+
+function keyPressed() {
+  if (gameState === "crystal" && cvStage === "rinse") {
+    if (keyCode === LEFT_ARROW || key === 'a' || key === 'A') {
+      cvTilt = max(-32, cvTilt - 3);
+    }
+    if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') {
+      cvTilt = min(32, cvTilt + 3);
+    }
+  }
 }
 
 // ---------- REAGENT BUTTONS ----------
