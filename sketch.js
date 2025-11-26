@@ -278,7 +278,11 @@ function drawResults() {
   );
 
   textSize(14);
-  text(slide.feedback, width / 2, 170, 600, 230); // keep within canvas width
+  const resultsTextWidth = 600;
+  const resultsTextX = (width - resultsTextWidth) / 2;
+  textAlign(LEFT, TOP);
+  text(slide.feedback, resultsTextX, 170, resultsTextWidth, 230); // keep within canvas width
+  textAlign(CENTER, TOP);
 
   drawButton(width / 2 - 150, height - 100, 120, 42, "Replay View");
   drawButton(width / 2 + 30, height - 100, 120, 42, "Next Slide");
