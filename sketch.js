@@ -189,10 +189,25 @@ function drawHeader() {
 // ---------- BENCH VIEW ----------
 
 function drawSlideBench() {
-  // slide
+  const slideCx = width / 2;
+  const slideCy = height / 2 + 50;
+  const tiltAngle = gameState === "crystal" && cvStage === "rinse" ? cvTilt * 0.35 : 0; // gentle visual tilt
+
+  // Slide with optional ghost tilt overlay to show rinse angle
   push();
   rectMode(CENTER);
-  translate(width / 2, height / 2 + 50);
+  translate(slideCx, slideCy);
+
+  // subtle ghost to show target tilt during rinse
+  if (tiltAngle !== 0) {
+    push();
+    rotate(radians(tiltAngle));
+    noFill();
+    stroke(160, 190);
+    strokeWeight(3);
+    rect(0, 0, width * 0.56 + 10, height * 0.2 + 10, 22);
+    pop();
+  }
 
   // shadow
   noStroke();
@@ -205,7 +220,7 @@ function drawSlideBench() {
   rect(0, 0, width * 0.56, height * 0.2, 20);
   pop();
 
-  slide.drawCellsBench(steps[currentStep]);
+  slide.drawCellsBench(steps[currentStep], tiltAngle);
 }
 
 function drawReagents() {
@@ -234,7 +249,7 @@ function drawStatusBar() {
   } else if (gameState === "crystal") {
     if (cvStage === "flood") msg = "Flood the smear with crystal violet until the outline is solid.";
     else if (cvStage === "soak") msg = "Keep it covered while the soak timer finishes.";
-    else if (cvStage === "rinse") msg = "Hold to rinse; tilt the slide so water runs off gently.";
+    else if (cvStage === "rinse") msg = "Hold to rinse; tilt with ◀ ▶ / A-D so water runs off gently.";
   } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
@@ -542,7 +557,7 @@ function drawCvRinseHUD() {
   fill(40);
   textAlign(CENTER, TOP);
   textSize(12);
-  text("Tilt with ◀ ▶ to guide rinse runoff", width / 2, arrowY + 12);
+  text("Tilt with ◀ ▶ or A/D to guide rinse runoff", width / 2, arrowY + 12);
 
   textAlign(CENTER, BOTTOM);
   textSize(13);
@@ -567,7 +582,7 @@ function drawCrystalHUD() {
   let line2 = "";
   if (cvStage === "flood") line2 = "Click/drag to flood the smear.";
   if (cvStage === "soak") line2 = "Hold coverage until the soak bar fills.";
-  if (cvStage === "rinse") line2 = "Hold to rinse; tilt to keep flow off the smear.";
+  if (cvStage === "rinse") line2 = "Hold to rinse; tilt with ◀ ▶ / A-D to keep flow off the smear.";
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
 
@@ -585,16 +600,23 @@ function drawCrystalPrompts() {
 }
 
 function updateCvRinse() {
-  if (cvStage !== "rinse" || !isCvRinsing) return;
-  const frameScale = deltaTime / 16.67;
-  const tiltSafety = constrain(abs(cvTilt) / 32, 0, 1);
+  if (cvStage !== "rinse") return;
 
-  // More tilt = gentler rinse, flat slide = harsher blast
-  const harshIncrement = (0.35 + (1 - tiltSafety) * 0.9) * frameScale;
-  cvRinseHarshness += harshIncrement;
+  if (isCvRinsing) {
+    const frameScale = deltaTime / 16.67;
+    const tiltSafety = constrain(abs(cvTilt) / 32, 0, 1);
 
-  const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
-  cvRinseProgress = min(cvRinseProgress + progressIncrement, CV_RINSE_PROGRESS_GOAL);
+    // More tilt = gentler rinse, flat slide = harsher blast
+    const harshIncrement = (0.35 + (1 - tiltSafety) * 0.9) * frameScale;
+    cvRinseHarshness += harshIncrement;
+
+    const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
+    cvRinseProgress = min(cvRinseProgress + progressIncrement, CV_RINSE_PROGRESS_GOAL);
+  }
+
+  if (cvRinseProgress >= CV_RINSE_PROGRESS_GOAL && !isCvRinsing) {
+    finishCrystalStep();
+  }
 }
 
 function paintCrystalAt(mx, my) {
@@ -751,7 +773,24 @@ class Slide {
     }
   }
 
-  drawCellsBench(step) {
+  drawCellsBench(step, tiltAngle = 0) {
+    const tiltActive = tiltAngle !== 0 && gameState === "crystal" && cvStage === "rinse";
+    if (tiltActive) {
+      const cx = width / 2;
+      const cy = height / 2 + 50;
+      push();
+      translate(cx, cy);
+      rotate(radians(tiltAngle));
+      for (let c of this.cells) {
+        if (!c.alive) continue;
+        const dx = c.slideX - cx;
+        const dy = c.slideY - cy;
+        c.drawBench(step, dx, dy);
+      }
+      pop();
+      return;
+    }
+
     for (let c of this.cells) {
       if (!c.alive) continue;
       c.drawBench(step);
@@ -932,9 +971,11 @@ class Cell {
     arc(0, size * 0.15, size * 0.35, size * 0.25, 0, PI);
   }
 
-  drawBench(step) {
+  drawBench(step, overrideX = null, overrideY = null) {
     push();
-    translate(this.slideX, this.slideY);
+    const tx = overrideX ?? this.slideX;
+    const ty = overrideY ?? this.slideY;
+    translate(tx, ty);
 
     // shadow
     noStroke();
