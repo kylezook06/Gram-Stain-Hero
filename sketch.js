@@ -32,6 +32,13 @@ const DECOLOR_POS_GRACE = 0.35; // seconds before Gram+ begin to fade
 const DECOLOR_PREVIEW_CAP = 1.15; // cap for per-cell decolorLevel
 const DECOLOR_SHOW_GAUGE = true; // easy mode: show a sweet-zone gauge
 
+// Pointer tilt helpers for rinses
+const POINTER_TILT_MAX = {
+  crystal: 32,
+  iodine: 30,
+  safranin: 28
+};
+
 // Crystal violet mini-game tuning
 const CV_GRID_COLS = 16;
 const CV_GRID_ROWS = 5;
@@ -691,7 +698,7 @@ function drawIoRinseHUD() {
   } else {
     fill(40);
     textAlign(CENTER, TOP);
-    text("Tilt with ◀ ▶ or A/D to guide rinse runoff", width / 2, py + 24);
+    text("Move mouse left/right while rinsing to tilt and slow runoff", width / 2, py + 24);
   }
 }
 
@@ -700,7 +707,7 @@ function drawIodineHUD() {
   const boxW = 360;
   const boxH = 70;
   const boxX = width / 2 - boxW / 2;
-  const boxY = height / 2 + 90;
+  const boxY = height / 2 + 60;
   fill(0, 0, 0, 45);
   noStroke();
   rect(boxX, boxY, boxW, boxH, 12);
@@ -712,7 +719,7 @@ function drawIodineHUD() {
   let line2 = "";
   if (ioStage === "flood") line2 = "Click/drag to flood with iodine.";
   if (ioStage === "soak") line2 = "Hold coverage for a quick lock-in.";
-  if (ioStage === "rinse") line2 = "Hold to rinse; tilt ◀ ▶ / A-D to soften flow (more tilt = slower, gentler).";
+  if (ioStage === "rinse") line2 = "Hold to rinse; move mouse left/right to tilt for gentler flow.";
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
 
@@ -733,8 +740,9 @@ function updateIoRinse() {
   if (ioStage !== "rinse") return;
 
   if (isIoRinsing) {
+    ioTilt = getPointerTilt(POINTER_TILT_MAX.iodine);
     const frameScale = deltaTime / 16.67;
-    const dynamics = computeRinseDynamics(ioTilt, 30);
+    const dynamics = computeRinseDynamics(ioTilt, POINTER_TILT_MAX.iodine);
     ioRinseTag = dynamics;
 
     ioRinseHarshness += dynamics.harshRate * frameScale;
@@ -905,7 +913,7 @@ function drawSafRinseHUD() {
   fill(40);
   textAlign(CENTER, TOP);
   textSize(12);
-  text("Tilt with ◀ ▶ or A/D to keep Gram– pink without blasting them.", width / 2, arrowY + 12);
+  text("Move mouse left/right while rinsing to tilt and keep Gram– pink.", width / 2, arrowY + 12);
 
   textAlign(CENTER, BOTTOM);
   textSize(13);
@@ -939,7 +947,7 @@ function drawSafraninHUD() {
     line2 = "Pink strength scales with soak + prior fade.";
   } else if (safStage === "rinse") {
     line1 = "Rinse gently with tilt to slow the flow.";
-    line2 = "Tilt ◀ ▶ / A-D; more tilt = slower but gentler rinse.";
+    line2 = "Move mouse left/right to tilt; more tilt = slower but gentler rinse.";
   }
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
@@ -967,8 +975,9 @@ function updateSafRinse() {
   if (safStage !== "rinse") return;
 
   if (isSafRinsing) {
+    safTilt = getPointerTilt(POINTER_TILT_MAX.safranin);
     const frameScale = deltaTime / 16.67;
-    const dynamics = computeRinseDynamics(safTilt, 28);
+    const dynamics = computeRinseDynamics(safTilt, POINTER_TILT_MAX.safranin);
     safRinseTag = dynamics;
 
     safRinseHarshness += dynamics.harshRate * frameScale;
@@ -1099,6 +1108,12 @@ function finalizeDryStep() {
   gameState = "microscope";
 }
 
+function ensureDryStatsCaptured() {
+  if (slide.dryness === undefined) {
+    slide.setDryStats(dryProgress, smearDragPenalty, blotMarks.length);
+  }
+}
+
 // ---------- DECOLORIZER MINI-GAME ----------
 
   function startDecolorStage() {
@@ -1123,7 +1138,7 @@ function drawDecolorHUD() {
   const boxW = 420;
   const boxH = 110;
   const boxX = width / 2 - boxW / 2;
-  const boxY = height / 2 + 90;
+    const boxY = height / 2 + 60;
   fill(0, 0, 0, 45);
   noStroke();
   rect(boxX, boxY, boxW, boxH, 12);
@@ -1227,12 +1242,27 @@ function computeRinseDynamics(tilt, maxTilt) {
   return { flowRate, harshRate, label, color, tiltNorm };
 }
 
+function getPointerTilt(maxTilt) {
+  const slideCx = width / 2;
+  const slideHalfW = (width * 0.56) / 2;
+  const norm = constrain((mouseX - slideCx) / slideHalfW, -1, 1);
+  return norm * maxTilt;
+}
+
 function drawDecolorPrompts() {
-  if (!isDecolorFlowing) {
-    drawActionButton(width / 2 - 120, height - 150, 240, 38, "Hold on slide to decolorize");
-  } else {
-    drawActionButton(width / 2 - 90, height - 150, 180, 38, "Release when runoff is clear");
-  }
+  // Inline hint bar instead of a floating button so the slide stays unobstructed
+  const hintY = height - 110;
+  fill(0, 0, 0, 45);
+  noStroke();
+  rect(width / 2 - 230, hintY - 26, 460, 52, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(13);
+  const hint = isDecolorFlowing
+    ? "Release when Gram– look pale and runoff clears."
+    : "Press on the slide to start flow; move mouse left/right to steer runoff.";
+  text(hint, width / 2, hintY);
 }
 
 function drawAlcoholOverlay() {
@@ -1349,7 +1379,7 @@ function drawCvRinseHUD() {
   fill(40);
   textAlign(CENTER, TOP);
   textSize(12);
-  text("Tilt with ◀ ▶ or A/D to guide rinse runoff", width / 2, arrowY + 12);
+  text("Move mouse left/right while rinsing to tilt the slide", width / 2, arrowY + 12);
 
   textAlign(CENTER, BOTTOM);
   textSize(13);
@@ -1380,7 +1410,7 @@ function drawCrystalHUD() {
   let line2 = "";
   if (cvStage === "flood") line2 = "Click/drag to flood the smear.";
   if (cvStage === "soak") line2 = "Hold coverage until the soak bar fills.";
-  if (cvStage === "rinse") line2 = "Hold to rinse; tilt ◀ ▶ / A-D to soften flow (more tilt = slower, gentler).";
+  if (cvStage === "rinse") line2 = "Hold to rinse; move mouse left/right to tilt for gentler flow.";
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
 
@@ -1401,8 +1431,9 @@ function updateCvRinse() {
   if (cvStage !== "rinse") return;
 
   if (isCvRinsing) {
+    cvTilt = getPointerTilt(POINTER_TILT_MAX.crystal);
     const frameScale = deltaTime / 16.67;
-    const dynamics = computeRinseDynamics(cvTilt, 32);
+    const dynamics = computeRinseDynamics(cvTilt, POINTER_TILT_MAX.crystal);
     cvRinseTag = dynamics;
 
     cvRinseHarshness += dynamics.harshRate * frameScale;
@@ -1459,6 +1490,8 @@ function finishCrystalStep() {
 // ---------- MICROSCOPE & RESULTS ----------
 
 function drawMicroscope() {
+  ensureDryStatsCaptured();
+
   background("#151018");
   fill(255);
   textAlign(CENTER, TOP);
@@ -1535,14 +1568,16 @@ function drawResults() {
   );
 
   text(
-    `Your call: ${slide.playerCallLabel || "(none)"}  |  True mix: ${slide.trueMajorityLabel}`,
+    `Your call: ${slide.playerCallLabel || "(none)"}  |  Seen on slide: ${slide.observedMajorityLabel || "(not set)"}`,
     width / 2,
     170
   );
 
   textSize(15);
-  const callVerdict = slide.interpretationCorrect ? "You called the mix correctly." : "Your call missed the true mix.";
-  text(callVerdict, width / 2, 200);
+  const callVerdict = slide.interpretationCorrect
+    ? "You matched what was visible under the scope."
+    : "Your call didn’t match the colors you produced.";
+  text(callVerdict + `  True mix: ${slide.trueMajorityLabel}`, width / 2, 200);
 
   textSize(14);
   const resultsTextWidth = 600;
@@ -1583,6 +1618,9 @@ class Slide {
     this.truePositiveCount = 0;
     this.trueNegativeCount = 0;
     this.trueMajorityLabel = "";
+    this.observedPositiveCount = 0;
+    this.observedNegativeCount = 0;
+    this.observedMajorityLabel = "";
     this.smearCoverage = 1;
     this.smearOverload = 0;
     this.heatLevel = 55;
@@ -1770,6 +1808,8 @@ class Slide {
 
     this.correctCount = 0;
     this.aliveCount = 0;
+    this.observedPositiveCount = 0;
+    this.observedNegativeCount = 0;
 
     const harshPenalty = constrain(this.cvRinseHarshness / (CV_RINSE_HARSH_TARGET * 2), 0, 1);
 
@@ -1813,11 +1853,15 @@ class Slide {
       c.finalColor = finalCol;
 
       const observedTone = pinkStrength >= 0.5 ? "pink" : "purple";
+      if (observedTone === "purple") this.observedPositiveCount++;
+      else this.observedNegativeCount++;
       const expectedTone = c.trueGram === "positive" ? "purple" : "pink";
       if (observedTone === expectedTone) {
         this.correctCount++;
       }
     }
+
+    this.observedMajorityLabel = this.observedPositiveCount >= this.observedNegativeCount ? "Mostly Gram+" : "Mostly Gram–";
 
     totalScore += this.correctCount;
     totalSlides++;
@@ -1827,9 +1871,10 @@ class Slide {
 
   setInterpretation(callKey) {
     this.playerCallLabel = callKey === "positive" ? "Mostly Gram+" : "Mostly Gram–";
+    const seenPositive = this.observedPositiveCount >= this.observedNegativeCount;
     this.interpretationCorrect =
-      (callKey === "positive" && this.truePositiveCount >= this.trueNegativeCount) ||
-      (callKey === "negative" && this.trueNegativeCount > this.truePositiveCount);
+      (callKey === "positive" && seenPositive) ||
+      (callKey === "negative" && !seenPositive);
     if (!this.interpretationScored) {
       totalCalls++;
       if (this.interpretationCorrect) {
