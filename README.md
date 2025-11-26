@@ -5,7 +5,7 @@ MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal v
 ## Try it locally
 1. Open `index.html` in a browser (no build step required). The canvas centers under the page heading via CSS.
 2. Prep the slide: paint an even smear with your mouse, then heat-fix it by hovering over the flame until the thermometer sits in the green band.
-3. Crystal violet mini-game: flood to 100% coverage, hold the soak bar until it fills, then tilt the slide (◀▶ / A-D) while rinsing to keep the flow gentle—the ghost outline tilts with you and the step auto-finishes once the rinse bar fills.
+3. Crystal violet mini-game: flood to 100% coverage, hold the soak bar until it fills, then tilt the slide (◀▶ / A-D) while rinsing to keep the flow gentle—the ghost outline tilts with you, harshness is capped so a brief flat moment won’t wipe the slide, and the step auto-finishes once the rinse bar fills.
 4. Click the reagent bottle buddies in order for iodine → decolorizer → safranin. Hold on the slide during the Decolorizer step; release in the green zone.
 5. Finish with safranin, jump to the microscope, and check your per-cell score.
 

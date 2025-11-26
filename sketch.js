@@ -837,8 +837,19 @@ class Slide {
     this.correctCount = 0;
     this.aliveCount = 0;
 
+    // Normalize rinse harshness so an overzealous rinse hurts but doesn't wipe the entire slide.
+    // Values above ~2x the harsh target will max the penalty.
+    const harshPenalty = constrain(this.cvRinseHarshness / (CV_RINSE_HARSH_TARGET * 2), 0, 1);
+
     for (let c of this.cells) {
-      const survivalProb = constrain(smearQuality * heatQuality * cvBinding - this.cvRinseHarshness * 0.02, 0, 1);
+      // Start with a healthy baseline so a perfect smear/heat/flood keeps most buddies alive.
+      const prepQuality = smearQuality * heatQuality * cvBinding;
+      const survivalProb = constrain(
+        0.2 + prepQuality * (1 - 0.6 * harshPenalty),
+        0,
+        1
+      );
+
       c.alive = random() < survivalProb;
       if (!c.alive) {
         c.finalColor = null;
