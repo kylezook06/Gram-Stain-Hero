@@ -22,9 +22,15 @@ const COLORS = {
 };
 
 const CELLS_PER_SLIDE = 20;
-const GAUGE_SPEED = 1.6;
-const GAUGE_MIN = 35; // "good" low bound
-const GAUGE_MAX = 75; // "good" high bound
+const GAUGE_MIN = 35; // "good" low bound (used for easy-mode guidance)
+const GAUGE_MAX = 75; // "good" high bound (used for easy-mode guidance)
+
+// Decolorizer tuning
+const DECOLOR_RATE_NEG = 1.2; // how quickly Gram– fade while alcohol flows
+const DECOLOR_RATE_POS = 0.45; // slower fade for Gram+
+const DECOLOR_POS_GRACE = 0.35; // seconds before Gram+ begin to fade
+const DECOLOR_PREVIEW_CAP = 1.15; // cap for per-cell decolorLevel
+const DECOLOR_SHOW_GAUGE = true; // easy mode: show a sweet-zone gauge
 
 // Crystal violet mini-game tuning
 const CV_GRID_COLS = 16;
@@ -49,8 +55,9 @@ let currentStep = 0;
 
 let reagents = [];
 let slide;
-let isPouring = false;
 let decolorGauge = 0;
+let isDecolorFlowing = false;
+let decolorRunoffHint = 0; // visual clarity cue (0 dull, 1 clear)
 
 // Crystal violet mini-game state
 let cvGrid;
@@ -100,8 +107,9 @@ function startNewSlide() {
   reagents = [];
   currentStep = 0;
   gameState = "smear";
-  isPouring = false;
   decolorGauge = 0;
+  isDecolorFlowing = false;
+  decolorRunoffHint = 0;
   initCrystalStage();
   initIodineStage();
   initSmearGrid();
@@ -152,14 +160,14 @@ function draw() {
     drawSlideBench();
     drawIodineStep();
     drawStatusBar();
-  } else if (gameState === "stain" || gameState === "decolor") {
+  } else if (gameState === "stain") {
     drawSlideBench();
     drawReagents();
     drawStatusBar();
-    if (gameState === "decolor") {
-      updateDecolorGauge();
-      drawDecolorGauge();
-    }
+  } else if (gameState === "decolor") {
+    drawSlideBench("decolorFlow", 0);
+    drawDecolorStep();
+    drawStatusBar();
   } else if (gameState === "microscope") {
     drawMicroscope();
   } else if (gameState === "results") {
@@ -211,15 +219,17 @@ function drawHeader() {
 
 // ---------- BENCH VIEW ----------
 
-function drawSlideBench() {
+function drawSlideBench(customStep = null, tiltOverride = null) {
   const slideCx = width / 2;
   const slideCy = height / 2 + 50;
   const tiltAngle =
-    gameState === "crystal" && cvStage === "rinse"
-      ? cvTilt * 0.35
-      : gameState === "iodine" && ioStage === "rinse"
-        ? ioTilt * 0.35
-        : 0; // gentle visual tilt
+    tiltOverride !== null
+      ? tiltOverride
+      : gameState === "crystal" && cvStage === "rinse"
+        ? cvTilt * 0.35
+        : gameState === "iodine" && ioStage === "rinse"
+          ? ioTilt * 0.35
+          : 0; // gentle visual tilt
 
   // Slide with optional ghost tilt overlay to show rinse angle
   push();
@@ -248,7 +258,8 @@ function drawSlideBench() {
   rect(0, 0, width * 0.56, height * 0.2, 20);
   pop();
 
-  slide.drawCellsBench(steps[currentStep], tiltAngle);
+  const stepKey = customStep ?? steps[currentStep];
+  slide.drawCellsBench(stepKey, tiltAngle);
 }
 
 function drawReagents() {
@@ -286,10 +297,10 @@ function drawStatusBar() {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
     if (s === "iodine") msg = "Click IODINE to lock in the purple stain.";
-    if (s === "decolor") msg = "Click DECOLORIZER, then hold on the slide to rinse.";
+    if (s === "decolor") msg = "Click DECOLORIZER to start the live fade mini-game.";
     if (s === "safranin") msg = "Click SAFRANIN to counterstain Gram– buddies pink.";
   } else if (gameState === "decolor") {
-    msg = "Hold on the slide to decolorize. Release in the green zone to separate Gram+ from Gram–.";
+    msg = "Hold on the slide to flow alcohol. Release when Gram– fade and runoff clears.";
   }
   text(msg, width / 2, height - 40);
   pop();
@@ -463,12 +474,6 @@ function getHeatQuality(level) {
   const delta = abs(level - ideal);
   const penalty = constrain(delta / tolerance, 0, 1);
   return constrain(1 - penalty * 0.6, 0.25, 1);
-}
-
-function updateDecolorGauge() {
-  if (gameState === "decolor" && isPouring) {
-    decolorGauge = constrain(decolorGauge + GAUGE_SPEED, 0, 100);
-  }
 }
 
 // ---------- CRYSTAL VIOLET MINI-GAME ----------
@@ -716,6 +721,131 @@ function finishIodineStep() {
   ioStage = "done";
   currentStep++;
   gameState = "stain";
+}
+
+// ---------- DECOLORIZER MINI-GAME ----------
+
+  function startDecolorStage() {
+    gameState = "decolor";
+    isDecolorFlowing = false;
+    decolorRunoffHint = 0;
+    decolorGauge = 0;
+    slide.resetDecolorLevels();
+  }
+
+function drawDecolorStep() {
+  slide.updateDecolorLevels(isDecolorFlowing);
+  if (isDecolorFlowing) {
+    drawAlcoholOverlay();
+  }
+  drawDecolorHUD();
+  drawDecolorPrompts();
+}
+
+function drawDecolorHUD() {
+  // Status box
+  const boxW = 420;
+  const boxH = 90;
+  const boxX = width / 2 - boxW / 2;
+  const boxY = height / 2 + 120;
+  fill(0, 0, 0, 45);
+  noStroke();
+  rect(boxX, boxY, boxW, boxH, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  let line1 = "Hold on the slide to flow alcohol.";
+  let line2 = "Release when Gram– look pale and runoff clears.";
+  if (DECOLOR_SHOW_GAUGE) {
+    line2 = "Watch the fade or use the gauge; release near the sweet zone.";
+  }
+  text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
+
+  if (DECOLOR_SHOW_GAUGE) {
+    drawDecolorGaugeEasy();
+  } else {
+    drawRunoffHintBar();
+  }
+}
+
+function drawRunoffHintBar() {
+  const barW = 320;
+  const barH = 12;
+  const x = width / 2 - barW / 2;
+  const y = height - 120;
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(x - 2, y - 2, barW + 4, barH + 4, 8);
+
+  fill("#c5f2c7");
+  rect(x, y, barW * constrain(decolorRunoffHint, 0, 1), barH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(x, y, barW, barH, 8);
+
+  noStroke();
+  fill(255);
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  text("Runoff clarity", width / 2, y - 6);
+}
+
+function drawDecolorGaugeEasy() {
+  const x = width / 2 - 200;
+  const y = height - 120;
+  const w = 400;
+  const h = 18;
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(x - 2, y - 2, w + 4, h + 4, 10);
+
+  // good window
+  fill("#c5f2c7");
+  let sx = x + (GAUGE_MIN / 100) * w;
+  let sw = ((GAUGE_MAX - GAUGE_MIN) / 100) * w;
+  rect(sx, y, sw, h, 10);
+
+  // fill based on live average decolor level
+  fill("#81a4ff");
+  rect(x, y, (decolorGauge / 100) * w, h, 10);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(x, y, w, h, 10);
+
+  noStroke();
+  fill(255);
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  text("Decolorizer Flow (avg)", width / 2, y - 5);
+}
+
+function drawDecolorPrompts() {
+  if (!isDecolorFlowing) {
+    drawActionButton(width / 2 - 120, height - 150, 240, 38, "Hold on slide to decolorize");
+  } else {
+    drawActionButton(width / 2 - 90, height - 150, 180, 38, "Release when runoff is clear");
+  }
+}
+
+function drawAlcoholOverlay() {
+  const slideW = width * 0.56;
+  const slideH = height * 0.2;
+  const cx = width / 2;
+  const cy = height / 2 + 50;
+  push();
+  rectMode(CENTER);
+  translate(cx, cy);
+  noStroke();
+  fill(183, 215, 255, 70);
+  rect(0, 0, slideW - 18, slideH - 12, 18);
+  pop();
 }
 
 function drawCrystalStep() {
@@ -1039,7 +1169,7 @@ class Slide {
   }
 
   drawCellsBench(step, tiltAngle = 0) {
-    const tiltActive = tiltAngle !== 0 && (gameState === "crystal" || gameState === "iodine") ;
+    const tiltActive = tiltAngle !== 0 && (gameState === "crystal" || gameState === "iodine");
     if (tiltActive) {
       const cx = width / 2;
       const cy = height / 2 + 50;
@@ -1096,9 +1226,58 @@ class Slide {
     this.ioRinseProgress = rinseProgress;
   }
 
+  resetDecolorLevels() {
+    this.meanDecolorLevel = 0;
+    this.meanDecolorLevelNorm = 0;
+    this.decolorRunoff = 0;
+    for (let c of this.cells) {
+      c.decolorLevel = 0;
+      c.decolorElapsed = 0;
+    }
+  }
+
+  updateDecolorLevels(flowing) {
+    const dt = deltaTime / 1000;
+    let totalLevel = 0;
+    let count = 0;
+
+    for (let c of this.cells) {
+      if (!c.alive) continue;
+      if (flowing) {
+        c.decolorElapsed += dt;
+        const grace = c.trueGram === "positive" && c.decolorElapsed < DECOLOR_POS_GRACE;
+        const rate = c.trueGram === "negative" ? DECOLOR_RATE_NEG : grace ? 0.08 : DECOLOR_RATE_POS;
+        c.decolorLevel = constrain(c.decolorLevel + rate * dt, 0, DECOLOR_PREVIEW_CAP);
+      }
+      totalLevel += c.decolorLevel;
+      count++;
+    }
+
+    this.meanDecolorLevel = count ? totalLevel / count : 0;
+    this.meanDecolorLevelNorm = constrain(this.meanDecolorLevel / DECOLOR_PREVIEW_CAP, 0, 1);
+
+    // Runoff clarity leans on Gram– fade
+    this.decolorRunoff = this.getGramAvgLevel("negative") / DECOLOR_PREVIEW_CAP;
+    decolorRunoffHint = constrain(this.decolorRunoff, 0, 1);
+    decolorGauge = constrain(this.meanDecolorLevelNorm * 100, 0, 100);
+  }
+
+  getGramAvgLevel(type) {
+    let total = 0;
+    let count = 0;
+    for (let c of this.cells) {
+      if (!c.alive) continue;
+      if (c.trueGram === type) {
+        total += c.decolorLevel;
+        count++;
+      }
+    }
+    return count ? total / count : 0;
+  }
+
   applyDecolorAndSafranin() {
-    // Map gauge to qualitative level 0..1
-    let g = decolorGauge / 100;
+    // Map per-cell decolor exposure to qualitative level 0..1
+    const globalExposure = this.meanDecolorLevelNorm ?? 0;
 
     const smearQuality = constrain(this.smearCoverage - this.smearOverload * 0.5, 0, 1);
     const heatQuality = getHeatQuality(this.heatLevel);
@@ -1133,8 +1312,9 @@ class Slide {
 
       // Jitter per cell so it's not perfectly deterministic
       let jitter = random(-0.08, 0.08);
+      const cellExposure = c.decolorLevel ? constrain(c.decolorLevel / DECOLOR_PREVIEW_CAP, 0, 1) : globalExposure;
       let effective = constrain(
-        g + jitter + map(rinseAdequacy, 0, 1, -0.2, 0.05) + (1 - iodineLock) * 0.25,
+        cellExposure + jitter + map(rinseAdequacy, 0, 1, -0.2, 0.05) + (1 - iodineLock) * 0.25,
         0,
         1
       );
@@ -1166,7 +1346,7 @@ class Slide {
     totalScore += this.correctCount;
     totalSlides++;
 
-    this.buildFeedback(g);
+    this.buildFeedback(globalExposure);
   }
 
   buildFeedback(g) {
@@ -1234,6 +1414,8 @@ class Cell {
     this.morph = morph; // "coccus" or "rod"
     this.finalColor = null; // set after decolor + safranin
     this.alive = true;
+    this.decolorLevel = 0;
+    this.decolorElapsed = 0;
   }
 
   drawBuddyBody(size, colorHex) {
@@ -1291,7 +1473,9 @@ class Cell {
 
     // choose color by step
     let colorHex;
-    if (step === "crystal" || step === "iodine" || step === "decolor") {
+    if (step === "decolorFlow") {
+      colorHex = this.getDecolorPreviewColor();
+    } else if (step === "crystal" || step === "iodine" || step === "decolor") {
       colorHex = COLORS.purple; // all purple after CV+iodine
     } else if (step === "safranin") {
       // show final colors if already decided
@@ -1313,6 +1497,22 @@ class Cell {
     this.drawBuddyBody(32, colorHex);
 
     pop();
+  }
+
+  getDecolorPreviewColor() {
+    const purple = color(COLORS.purple);
+    const pink = color(COLORS.pink);
+    const level = constrain(this.decolorLevel / DECOLOR_PREVIEW_CAP, 0, 1);
+
+    if (this.trueGram === "negative") {
+      // Gram– fade fast: purple -> pink as level rises
+      return lerpColor(purple, pink, constrain(level * 1.1, 0, 1));
+    }
+
+    // Gram+ hold longer: grace then slow lerp toward pink
+    const start = 0.45;
+    const fraction = constrain((level - start) / 0.55, 0, 1);
+    return lerpColor(purple, pink, fraction);
   }
 }
 
@@ -1380,7 +1580,7 @@ function mousePressed() {
     }
   } else if (gameState === "decolor") {
     if (isMouseOnSlide()) {
-      isPouring = true;
+      isDecolorFlowing = true;
     }
   } else if (gameState === "microscope") {
     // "Show Results" button
@@ -1397,9 +1597,9 @@ function mousePressed() {
 }
 
 function mouseReleased() {
-  if (gameState === "decolor" && isPouring) {
-    isPouring = false;
-    // finalize cell colors based on gauge
+  if (gameState === "decolor" && isDecolorFlowing) {
+    isDecolorFlowing = false;
+    // finalize cell colors based on live per-cell decolor levels
     slide.applyDecolorAndSafranin();
     // move to saf step
     currentStep = 3; // saf
@@ -1444,9 +1644,7 @@ function handleReagentClick(id) {
   } else if (id === "iodine") {
     gameState = "iodine";
   } else if (id === "decolor") {
-    gameState = "decolor";
-    decolorGauge = 0;
-    isPouring = false;
+    startDecolorStage();
   } else if (id === "safranin") {
     // after saf, go to microscope
     gameState = "microscope";
