@@ -28,13 +28,13 @@
       margin: 0;
       font-size: 15px;
       color: #4a4a4a;
-      max-width: 720px;
+      max-width: 740px;
     }
-    #canvas-container {
+    canvas {
+      display: block;
       margin: 12px auto 24px auto;
       box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
       border-radius: 16px;
-      overflow: hidden;
     }
     footer {
       margin-bottom: 20px;
@@ -48,9 +48,8 @@
 <body>
   <header>
     <h1>MicroBuddyz Gram Stain Hero</h1>
-    <p>Follow the stain order, time your decolorizer rinse, then hop to the microscope to see if you called the Gram reaction correctly.</p>
+    <p>Step through crystal violet → iodine → a timing-based decolorizer rinse → safranin, then hop to the microscope to see if your call matches the Gram reaction.</p>
   </header>
-  <div id="canvas-container"></div>
-  <footer>New: decolorizer timing mini-game, microscope readout, and replayable random slides.</footer>
+  <footer>Now centered with alternating Gram slides, score/lives HUD, and mixed cocci + rods every round.</footer>
 </body>
 </html>
