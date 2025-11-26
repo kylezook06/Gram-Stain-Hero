@@ -55,8 +55,8 @@ const SAF_RINSE_HARSH_TARGET = 5;
 
 // ---------- GLOBAL STATE ----------
 
-// Overall state machine walks through: smear prep -> heat-fix -> staining flow -> microscope -> results
-let gameState = "smear"; // "smear", "heatFix", "stain", "decolor", "microscope", "results"
+// Overall state machine walks through: smear prep -> heat-fix -> staining flow -> dry -> microscope -> results
+let gameState = "smear"; // "smear", "heatFix", "stain", "decolor", "dry", "microscope", "results"
 let steps = ["crystal", "iodine", "decolor", "safranin"];
 let currentStep = 0;
 
@@ -99,6 +99,15 @@ let safTilt = -14;
 let isSafPouring = false;
 let isSafRinsing = false;
 
+// Dry & observe mini-game state
+let blotMarks = [];
+let dryProgress = 0; // 0..1
+let smearDragPenalty = 0;
+let isBlotting = false;
+let lastBlotX = 0;
+let lastBlotY = 0;
+let playerInterpretation = null; // "positive" | "negative"
+
 // Smear + heat-fix data
 const GRID_COLS = 18;
 const GRID_ROWS = 6;
@@ -111,6 +120,8 @@ let isHeating = false;
 
 let totalScore = 0;
 let totalSlides = 0;
+let totalCalls = 0;
+let totalCorrectCalls = 0;
 
 // ---------- SETUP ----------
 
@@ -134,6 +145,13 @@ function startNewSlide() {
   initSmearGrid();
   heat = 0;
   isHeating = false;
+  blotMarks = [];
+  dryProgress = 0;
+  smearDragPenalty = 0;
+  isBlotting = false;
+  lastBlotX = 0;
+  lastBlotY = 0;
+  playerInterpretation = null;
 
   const labels = [
     { id: "crystal", name: "Crystal Violet", color: COLORS.purple },
@@ -182,6 +200,10 @@ function draw() {
   } else if (gameState === "safranin") {
     drawSlideBench();
     drawSafraninStep();
+    drawStatusBar();
+  } else if (gameState === "dry") {
+    drawSlideBench("safranin");
+    drawDryStep();
     drawStatusBar();
   } else if (gameState === "stain") {
     drawSlideBench();
@@ -234,7 +256,7 @@ function drawHeader() {
   textSize(14);
   fill(COLORS.textDark);
   text(
-    "Total score: " + totalScore + "   Slides played: " + totalSlides,
+    "Total score: " + totalScore + "   Slides: " + totalSlides + "   Calls: " + totalCorrectCalls + "/" + totalCalls,
     width - 40,
     35
   );
@@ -330,6 +352,10 @@ function drawStatusBar() {
     if (s === "safranin") msg = "Click SAFRANIN to counterstain Gram– buddies pink.";
   } else if (gameState === "decolor") {
     msg = "Hold on the slide to flow alcohol. Release when Gram– fade and runoff clears.";
+  } else if (gameState === "dry") {
+    msg = "Click to blot dry. Dragging while blotting will smear the slide slightly.";
+  } else if (gameState === "microscope") {
+    msg = "Choose Mostly Gram+ or Mostly Gram–, then show results.";
   }
   text(msg, width / 2, height - 40);
   pop();
@@ -979,6 +1005,83 @@ function finishSafraninStep() {
   slide.applyFinalSafranin();
   safStage = "done";
   currentStep++;
+  gameState = "dry";
+}
+
+// ---------- DRY & OBSERVE MINI-GAME ----------
+
+function drawDryStep() {
+  // overlay blot marks on top of the slide
+  drawBlotMarks();
+  drawDryHUD();
+  drawDryPrompts();
+}
+
+function drawBlotMarks() {
+  for (let blot of blotMarks) {
+    push();
+    translate(blot.x, blot.y);
+    noStroke();
+    fill(255, 255, 255, 120);
+    ellipse(0, 0, blot.r * 2, blot.r * 1.4);
+    pop();
+  }
+}
+
+function drawDryHUD() {
+  const boxW = 380;
+  const boxH = 80;
+  const boxX = width / 2 - boxW / 2;
+  const boxY = height / 2 + 110;
+  fill(0, 0, 0, 45);
+  noStroke();
+  rect(boxX, boxY, boxW, boxH, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  const drynessPct = floor(dryProgress * 100);
+  const smearPct = floor(constrain(smearDragPenalty, 0, 1) * 100);
+  text(`Blot dry with clicks (do not drag). Dryness: ${drynessPct}%  |  Smear risk: ${smearPct}%`, width / 2, boxY + boxH / 2);
+
+  // dryness bar
+  const barW = 260;
+  const barH = 12;
+  const barX = width / 2 - barW / 2;
+  const barY = boxY + boxH + 14;
+  fill(0, 0, 0, 40);
+  rect(barX - 2, barY - 2, barW + 4, barH + 4, 8);
+  fill("#d6f6d2");
+  rect(barX, barY, barW * dryProgress, barH, 8);
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(barX, barY, barW, barH, 8);
+}
+
+function drawDryPrompts() {
+  if (dryProgress >= 1) {
+    drawActionButton(width / 2 - 90, height - 90, 180, 40, "Go to Microscope");
+  } else {
+    drawActionButton(width / 2 - 110, height - 90, 220, 40, "Click pads to blot the slide");
+  }
+}
+
+function addBlotAt(mx, my, dragged = false) {
+  if (!isMouseOnSlide()) return;
+  const r = random(18, 26);
+  blotMarks.push({ x: mx, y: my, r });
+  if (!dragged) {
+    dryProgress = min(1, dryProgress + 0.18);
+  } else {
+    smearDragPenalty = min(1.2, smearDragPenalty + dist(mx, my, lastBlotX, lastBlotY) * 0.01);
+  }
+  lastBlotX = mx;
+  lastBlotY = my;
+}
+
+function finalizeDryStep() {
+  slide.setDryStats(dryProgress, smearDragPenalty, blotMarks.length);
   gameState = "microscope";
 }
 
@@ -1335,14 +1438,44 @@ function drawMicroscope() {
   fill("#f8f9ff");
   ellipse(cx, cy, r * 2, r * 2);
 
-  slide.drawCellsMicroscope(cx, cy, r);
+  const clarity = constrain(1 - smearDragPenalty * 0.25, 0.65, 1);
+  slide.drawCellsMicroscope(cx, cy, r, clarity);
 
   fill(255);
   textAlign(CENTER, TOP);
   textSize(15);
-  text("Purple = Gram+, Pink = Gram–. How many did you nail?", width / 2, 90);
+  text("Purple = Gram+, Pink = Gram–. Pick the dominant Gram reaction.", width / 2, 90);
 
-  drawButton(width / 2 - 70, height - 80, 140, 42, "Show Results");
+  drawInterpretButtons();
+
+  const ready = playerInterpretation !== null;
+  const btnLabel = ready ? "Show Results" : "Choose an interpretation";
+  drawButton(width / 2 - 90, height - 80, 180, 42, btnLabel, !ready);
+}
+
+function drawInterpretButtons() {
+  const btnW = 170;
+  const btnH = 44;
+  const y = height - 140;
+  const leftX = width / 2 - btnW - 15;
+  const rightX = width / 2 + 15;
+
+  const pickBtn = (x, label, gramKey) => {
+    const selected = playerInterpretation === gramKey;
+    const hover = mouseX > x && mouseX < x + btnW && mouseY > y && mouseY < y + btnH;
+    const bg = selected ? "#7bffa6" : hover ? "#ffd8a6" : "#ffffff";
+    stroke(50);
+    strokeWeight(selected ? 3 : 2);
+    fill(bg);
+    rect(x, y, btnW, btnH, 10);
+    fill(30);
+    textAlign(CENTER, CENTER);
+    textSize(13);
+    text(label, x + btnW / 2, y + btnH / 2);
+  };
+
+  pickBtn(leftX, "Mostly Gram+", "positive");
+  pickBtn(rightX, "Mostly Gram–", "negative");
 }
 
 function drawResults() {
@@ -1359,6 +1492,16 @@ function drawResults() {
     130
   );
 
+  text(
+    `Your call: ${slide.playerCallLabel || "(none)"}  |  True mix: ${slide.trueMajorityLabel}`,
+    width / 2,
+    160
+  );
+
+  textSize(15);
+  const callVerdict = slide.interpretationCorrect ? "You called the mix correctly." : "Your call missed the true mix.";
+  text(callVerdict, width / 2, 185);
+
   textSize(14);
   const resultsTextWidth = 600;
   const resultsTextX = (width - resultsTextWidth) / 2;
@@ -1370,12 +1513,14 @@ function drawResults() {
   drawButton(width / 2 + 30, height - 100, 120, 42, "Next Slide");
 }
 
-function drawButton(x, y, w, h, label) {
-  let hover = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+function drawButton(x, y, w, h, label, disabled = false) {
+  let hover = !disabled && mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
   noStroke();
-  fill(hover ? "#ff9f7b" : "#ff845b");
+  const base = disabled ? color("#c9c9c9") : color("#ff845b");
+  const hoverCol = disabled ? base : color("#ff9f7b");
+  fill(hover ? hoverCol : base);
   rect(x, y, w, h, 10);
-  fill(30);
+  fill(disabled ? 120 : 30);
   textAlign(CENTER, CENTER);
   textSize(14);
   text(label, x + w / 2, y + h / 2);
@@ -1392,6 +1537,9 @@ class Slide {
     this.cells = [];
     this.correctCount = 0;
     this.feedback = "";
+    this.truePositiveCount = 0;
+    this.trueNegativeCount = 0;
+    this.trueMajorityLabel = "";
     this.smearCoverage = 1;
     this.smearOverload = 0;
     this.heatLevel = 55;
@@ -1425,10 +1573,17 @@ class Slide {
       let sy = sin(ang) * radius;
 
       let gram = random() < 0.5 ? "positive" : "negative";
+      if (gram === "positive") this.truePositiveCount++;
+      else this.trueNegativeCount++;
       let morph = random() < 0.5 ? "coccus" : "rod";
 
       this.cells.push(new Cell(x, y, sx, sy, gram, morph));
     }
+
+    this.trueMajorityLabel = this.truePositiveCount >= this.trueNegativeCount ? "Mostly Gram+" : "Mostly Gram–";
+    this.playerCallLabel = "";
+    this.interpretationCorrect = false;
+    this.interpretationScored = false;
   }
 
   drawCellsBench(step, tiltAngle = 0) {
@@ -1455,7 +1610,9 @@ class Slide {
     }
   }
 
-  drawCellsMicroscope(cx, cy, r) {
+  drawCellsMicroscope(cx, cy, r, clarity = 1) {
+    push();
+    drawingContext.globalAlpha = clarity;
     for (let c of this.cells) {
       if (!c.alive) continue;
       let px = cx + c.scopeX;
@@ -1464,6 +1621,7 @@ class Slide {
         c.drawMicroscope(px, py);
       }
     }
+    pop();
   }
 
   setSmearStats(coverage, overload) {
@@ -1494,6 +1652,12 @@ class Slide {
     this.safSoakTime = soakSeconds;
     this.safRinseHarshness = rinseHarshness;
     this.safRinseProgress = rinseProgress;
+  }
+
+  setDryStats(dryness, smearDrag, blotCount) {
+    this.dryness = dryness;
+    this.smearDrag = smearDrag;
+    this.blotCount = blotCount;
   }
 
   resetDecolorLevels() {
@@ -1618,6 +1782,21 @@ class Slide {
     this.buildFeedback(globalExposure, safSoakQuality, safRinsePenalty, safRinseCompleteness);
   }
 
+  setInterpretation(callKey) {
+    this.playerCallLabel = callKey === "positive" ? "Mostly Gram+" : "Mostly Gram–";
+    this.interpretationCorrect =
+      (callKey === "positive" && this.truePositiveCount >= this.trueNegativeCount) ||
+      (callKey === "negative" && this.trueNegativeCount > this.truePositiveCount);
+    if (!this.interpretationScored) {
+      totalCalls++;
+      if (this.interpretationCorrect) {
+        totalCorrectCalls++;
+        totalScore += 10; // small bonus for a correct read
+      }
+      this.interpretationScored = true;
+    }
+  }
+
   buildFeedback(g, safSoakQuality, safRinsePenalty, safRinseCompleteness) {
     let line;
     if (g < GAUGE_MIN / 100) {
@@ -1640,7 +1819,7 @@ class Slide {
       "Each MicroBuddy has a true Gram type.\n\n" +
       "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
       line + "\n" + safLine + "\n\n" +
-      this.getCrystalNote() + this.getIodineNote() + this.getSafraninNote(safSoakQuality, safRinsePenalty) +
+      this.getCrystalNote() + this.getIodineNote() + this.getSafraninNote(safSoakQuality, safRinsePenalty) + this.getDryNote() +
       `You correctly stained ${this.correctCount} out of ${this.aliveCount || this.cells.length} visible cells on this slide.`;
   }
 
@@ -1688,6 +1867,16 @@ class Slide {
       ? "Rinse was strong and may have washed Gram– too pale."
       : "Rinse stayed gentle so Gram– held onto pink.";
     return `${soakText} ${rinseText}\n\n`;
+  }
+
+  getDryNote() {
+    const dryness = this.dryness ?? 0;
+    const smear = constrain(this.smearDrag ?? 0, 0, 1);
+    let line = "Drying: " + floor(dryness * 100) + "% blotted. ";
+    if (smear > 0.6) line += "Dragging the blotter smeared the field a bit.";
+    else if (smear > 0.25) line += "A little smear from dragging the blotter.";
+    else line += "Slide stayed clean during blotting.";
+    return line + "\n";
   }
 }
 
@@ -1876,6 +2065,16 @@ function mousePressed() {
         isSafRinsing = true;
       }
     }
+  } else if (gameState === "dry") {
+    if (isMouseOnSlide()) {
+      isBlotting = true;
+      addBlotAt(mouseX, mouseY, false);
+      return;
+    }
+    if (dryProgress >= 1 && isMouseOverButton(width / 2 - 90, height - 90, 180, 40)) {
+      finalizeDryStep();
+      return;
+    }
   } else if (gameState === "stain") {
     // reagent clicks
     for (let r of reagents) {
@@ -1889,8 +2088,15 @@ function mousePressed() {
       isDecolorFlowing = true;
     }
   } else if (gameState === "microscope") {
+    // interpretation buttons
+    const pick = interpretButtonHit(mouseX, mouseY);
+    if (pick) {
+      playerInterpretation = pick;
+      slide.setInterpretation(pick);
+    }
+
     // "Show Results" button
-    if (isMouseOverButton(width / 2 - 70, height - 80, 140, 42)) {
+    if (playerInterpretation && isMouseOverButton(width / 2 - 90, height - 80, 180, 42)) {
       gameState = "results";
     }
   } else if (gameState === "results") {
@@ -1924,6 +2130,9 @@ function mouseReleased() {
     isSafPouring = false;
     isSafRinsing = false;
   }
+  if (gameState === "dry") {
+    isBlotting = false;
+  }
 }
 
 function mouseDragged() {
@@ -1942,6 +2151,8 @@ function mouseDragged() {
     paintIodineAt(mouseX, mouseY);
   } else if (gameState === "safranin" && isMouseOnSlide() && (safStage === "flood" || safStage === "soak") && isSafPouring) {
     paintSafraninAt(mouseX, mouseY);
+  } else if (gameState === "dry" && isBlotting && isMouseOnSlide()) {
+    addBlotAt(mouseX, mouseY, true);
   }
 }
 
@@ -1977,6 +2188,18 @@ function isMouseOnSlide() {
 
 function isMouseOverButton(x, y, w, h) {
   return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
+}
+
+function interpretButtonHit(mx, my) {
+  const btnW = 170;
+  const btnH = 44;
+  const y = height - 140;
+  const leftX = width / 2 - btnW - 15;
+  const rightX = width / 2 + 15;
+
+  if (mx > leftX && mx < leftX + btnW && my > y && my < y + btnH) return "positive";
+  if (mx > rightX && mx < rightX + btnW && my > y && my < y + btnH) return "negative";
+  return null;
 }
 
 function keyPressed() {
