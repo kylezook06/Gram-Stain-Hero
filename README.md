@@ -1,15 +1,16 @@
 # Gram-Stain-Hero
 
-MicroBuddyz-style Gram staining mini-game built with p5.js. Work through crystal violet → iodine → a timing-based decolorizer rinse → safranin, then read your slide in the microscope to see if you called the Gram reaction correctly.
+MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal violet, lock with iodine, time your decolorizer rinse → safranin, then hop to the microscope to see how many cells you stained correctly.
 
 ## Try it locally
-1. Open `index.html` in a browser (no build step required). The canvas auto-centers under the page heading.
-2. Click the reagent bottle buddies in order. Time the decolorizer in the green zone, then finish with safranin and check the microscope.
+1. Open `index.html` in a browser (no build step required). The canvas centers under the page heading via CSS.
+2. Click the reagent bottle buddies in order. Hold on the slide during the Decolorizer step; release in the green zone.
+3. Finish with safranin, jump to the microscope, and check your per-cell score.
 
 ## What's included
-- **MicroBuddy cells:** plush mixed cocci and rods with safety eyes and soft shading on both the bench view and microscope view.
-- **Reagent bottle buddies:** clickable bottles with hover/active states, step gating, and completion checkmarks.
-- **Lab bench & microscope layout:** warm palette, centered canvas, decolorizer gauge mini-game, microscope readout, and score/replay screen.
-- **Gameplay loop:** alternating Gram+ and Gram– slides, mixed morphologies regardless of Gram reaction, timing-based scoring (score/lives HUD), and explanations of how your decolorization affected the interpretation.
+- **Plushy MicroBuddy cells:** mixed cocci and rods every slide, safety eyes, soft highlights, and scope-ready shading.
+- **Bottle buddies UI:** clickable reagent bottles with hover/active states, gating, and completion checkmarks.
+- **Per-cell scoring loop:** each slide contains a mix of Gram+ and Gram– cells; your decolorizer timing flips colors per-cell and adds to your total score.
+- **Lab & scope layout:** centered canvas, warm bench palette, decolorizer gauge mini-game, microscope view, and results screen text constrained to the page.
 
-Paste the included `sketch.js` into editor.p5js.org to iterate further, or tweak the HTML/CSS locally to fit your lesson plan.
+Paste the included `sketch.js` into editor.p5js.org to iterate, or tweak the HTML/CSS locally to fit your lesson plan.

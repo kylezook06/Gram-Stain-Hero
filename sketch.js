@@ -1,29 +1,10 @@
-// MicroBuddyz Gram Stain Hero – v2
-// - Centered canvas
-// - Mixed cocci/rods per slide (morphology != Gram type)
-// - Alternating Gram type between slides
-// - Score / Lives HUD
-// - Plushier MicroBuddy cells
+// MicroBuddyz Gram Stain – Per-cell Game Version
+// Paste into editor.p5js.org and remove any old sketch code first.
 
-let canvas;
+// ---------- CONFIG ----------
 
-let mode = "stain"; // "stain", "decolor", "microscope", "score"
-let steps = ["crystal", "iodine", "decolor", "safranin"];
-let currentStepIndex = 0;
-
-let reagents = [];
-let slideObj;
-
-let isPouring = false;
-let decolorGauge = 0;
-const GAUGE_SPEED = 1.4;
-const GAUGE_MIN = 35;
-const GAUGE_MAX = 75;
-
-let score = 0;
-let lives = 3;
-let slideNumber = 1;
-let lastSlideType = null; // alternate Gram+/Gram–
+const WIDTH = 900;
+const HEIGHT = 600;
 
 const COLORS = {
   bg: "#fdf7f2",
@@ -31,46 +12,47 @@ const COLORS = {
   tableShadow: "#d5c1b2",
   slide: "#f7fbff",
   slideBorder: "#b1c8dd",
-  gramPosBase: "#f6d8a8",
-  gramNegBase: "#c7f0eb",
   purple: "#7b4fff",
   pink: "#ff639b",
+  neutralPos: "#f6d8a8", // pale beige
+  neutralNeg: "#c7f0eb", // pale teal
   bottleOutline: "#2b2b3a",
   textDark: "#3b2f2a",
   uiPanel: "#2f2931"
 };
 
+const CELLS_PER_SLIDE = 20;
+const GAUGE_SPEED = 1.6;
+const GAUGE_MIN = 35; // "good" low bound
+const GAUGE_MAX = 75; // "good" high bound
+
+// ---------- GLOBAL STATE ----------
+
+let gameState = "stain"; // "stain", "decolor", "microscope", "results"
+let steps = ["crystal", "iodine", "decolor", "safranin"];
+let currentStep = 0;
+
+let reagents = [];
+let slide;
+let isPouring = false;
+let decolorGauge = 0;
+
+let totalScore = 0;
+let totalSlides = 0;
+
+// ---------- SETUP ----------
+
 function setup() {
-  canvas = createCanvas(900, 600);
-  centerCanvas();
-  angleMode(DEGREES);
+  createCanvas(WIDTH, HEIGHT);
   textFont("sans-serif");
   startNewSlide();
 }
 
-function centerCanvas() {
-  const x = (windowWidth - width) / 2;
-  const y = max(20, (windowHeight - height) / 2);
-  canvas.position(x, y);
-}
-
-function windowResized() {
-  centerCanvas();
-}
-
 function startNewSlide() {
-  let type;
-  if (lastSlideType === null) {
-    type = random() < 0.5 ? "positive" : "negative";
-  } else {
-    type = lastSlideType === "positive" ? "negative" : "positive";
-  }
-  lastSlideType = type;
-
-  slideObj = new Slide(type);
+  slide = new Slide();
   reagents = [];
-  currentStepIndex = 0;
-  mode = "stain";
+  currentStep = 0;
+  gameState = "stain";
   isPouring = false;
   decolorGauge = 0;
 
@@ -95,27 +77,29 @@ function startNewSlide() {
   }
 }
 
+// ---------- MAIN DRAW ----------
+
 function draw() {
   background(COLORS.bg);
   drawTable();
-  drawHeaderAndHUD();
+  drawHeader();
 
-  if (mode === "stain" || mode === "decolor") {
-    drawSlideBenchView();
+  if (gameState === "stain" || gameState === "decolor") {
+    drawSlideBench();
     drawReagents();
     drawStatusBar();
-    if (mode === "decolor") {
+    if (gameState === "decolor") {
       updateDecolorGauge();
       drawDecolorGauge();
     }
-  } else if (mode === "microscope") {
-    drawMicroscopeView();
-  } else if (mode === "score") {
-    drawScoreScreen();
+  } else if (gameState === "microscope") {
+    drawMicroscope();
+  } else if (gameState === "results") {
+    drawResults();
   }
 }
 
-// ----------------- Layout & UI -----------------
+// ---------- LAYOUT ----------
 
 function drawTable() {
   noStroke();
@@ -126,58 +110,62 @@ function drawTable() {
   rect(20, 120, width - 40, height - 140, 26);
 }
 
-function drawHeaderAndHUD() {
+function drawHeader() {
   fill(COLORS.textDark);
   textAlign(LEFT, CENTER);
   textSize(20);
-  text("MicroBuddyz Gram Stain Lab", 40, 35);
+  text("MicroBuddyz Gram Stain Hero", 40, 35);
 
   textSize(13);
-  let stepName = steps[currentStepIndex] || "done";
-  let human = "";
-  if (stepName === "crystal") human = "Step 1 \u2013 Crystal Violet (primary stain)";
-  if (stepName === "iodine") human = "Step 2 \u2013 Iodine (mordant)";
-  if (stepName === "decolor") human = "Step 3 \u2013 Decolorizer (timing matters!)";
-  if (stepName === "safranin") human = "Step 4 \u2013 Safranin (counterstain)";
+  let stepName = steps[currentStep] || "done";
+  let sub = "";
+  if (stepName === "crystal") sub = "Step 1 – Crystal Violet (primary stain)";
+  if (stepName === "iodine") sub = "Step 2 – Iodine (mordant)";
+  if (stepName === "decolor") sub = "Step 3 – Decolorizer (timing matters!)";
+  if (stepName === "safranin") sub = "Step 4 – Safranin (counterstain)";
   fill(80, 90);
-  text(human, 40, 60);
+  text(sub, 40, 60);
 
+  // Simple total score HUD
   textAlign(RIGHT, CENTER);
   textSize(14);
   fill(COLORS.textDark);
   text(
-    "Score: " + score + "   Lives: " + lives + "   Slide: " + slideNumber,
+    "Total score: " + totalScore + "   Slides played: " + totalSlides,
     width - 40,
     35
   );
 }
 
-function drawReagents() {
-  for (let i = 0; i < reagents.length; i++) {
-    const r = reagents[i];
-    const isCurrent = steps[currentStepIndex] === r.id;
-    const isDone = i < currentStepIndex;
-    r.draw(isCurrent, isDone);
-  }
-}
+// ---------- BENCH VIEW ----------
 
-function drawSlideBenchView() {
+function drawSlideBench() {
+  // slide
   push();
   rectMode(CENTER);
   translate(width / 2, height / 2 + 50);
 
+  // shadow
   noStroke();
   fill(0, 0, 0, 40);
-  rect(12, 18, width * 0.56, height * 0.20, 20);
+  rect(12, 18, width * 0.56, height * 0.2, 20);
 
   stroke(COLORS.slideBorder);
   strokeWeight(4);
   fill(COLORS.slide);
-  rect(0, 0, width * 0.56, height * 0.20, 20);
-
+  rect(0, 0, width * 0.56, height * 0.2, 20);
   pop();
 
-  slideObj.drawCellsBench();
+  slide.drawCellsBench(steps[currentStep]);
+}
+
+function drawReagents() {
+  for (let i = 0; i < reagents.length; i++) {
+    let r = reagents[i];
+    let isCurrent = steps[currentStep] === r.id;
+    let isDone = i < currentStep;
+    r.draw(isCurrent, isDone);
+  }
 }
 
 function drawStatusBar() {
@@ -188,19 +176,17 @@ function drawStatusBar() {
 
   fill(255);
   textAlign(CENTER, CENTER);
-  textSize(17);
+  textSize(16);
   let msg = "";
-
-  if (mode === "stain") {
-    const s = steps[currentStepIndex];
-    if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood the slide.";
-    if (s === "iodine") msg = "Click IODINE to lock the purple into Gram+ buddies.";
+  if (gameState === "stain") {
+    let s = steps[currentStep];
+    if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
+    if (s === "iodine") msg = "Click IODINE to lock in the purple stain.";
     if (s === "decolor") msg = "Click DECOLORIZER, then hold on the slide to rinse.";
-    if (s === "safranin") msg = "Click SAFRANIN to give Gram\u2013 buddies a rosy glow.";
-  } else if (mode === "decolor") {
-    msg = "Hold the mouse on the slide to apply decolorizer. Release in the green zone!";
+    if (s === "safranin") msg = "Click SAFRANIN to counterstain Gram– buddies pink.";
+  } else if (gameState === "decolor") {
+    msg = "Hold on the slide to decolorize. Release in the green zone to separate Gram+ from Gram–.";
   }
-
   text(msg, width / 2, height - 40);
   pop();
 }
@@ -215,14 +201,15 @@ function drawDecolorGauge() {
   fill(0, 0, 0, 40);
   rect(x - 2, y - 2, w + 4, h + 4, 10);
 
+  // good window
   fill("#c5f2c7");
-  let sweetX = x + (GAUGE_MIN / 100) * w;
-  let sweetW = ((GAUGE_MAX - GAUGE_MIN) / 100) * w;
-  rect(sweetX, y, sweetW, h, 10);
+  let sx = x + (GAUGE_MIN / 100) * w;
+  let sw = ((GAUGE_MAX - GAUGE_MIN) / 100) * w;
+  rect(sx, y, sw, h, 10);
 
+  // fill
   fill("#81a4ff");
-  let fillW = (decolorGauge / 100) * w;
-  rect(x, y, fillW, h, 10);
+  rect(x, y, (decolorGauge / 100) * w, h, 10);
 
   noFill();
   stroke(255);
@@ -237,16 +224,15 @@ function drawDecolorGauge() {
 }
 
 function updateDecolorGauge() {
-  if (mode === "decolor" && isPouring) {
+  if (gameState === "decolor" && isPouring) {
     decolorGauge = constrain(decolorGauge + GAUGE_SPEED, 0, 100);
   }
 }
 
-// ----------------- Microscope & Score -----------------
+// ---------- MICROSCOPE & RESULTS ----------
 
-function drawMicroscopeView() {
+function drawMicroscope() {
   background("#151018");
-
   fill(255);
   textAlign(CENTER, TOP);
   textSize(22);
@@ -256,345 +242,314 @@ function drawMicroscopeView() {
   const cy = height / 2 + 20;
   const r = 190;
 
+  // vignette
   noStroke();
   fill(10);
   rect(0, 80, width, height - 120);
 
+  // scope circle
   fill("#1d1b29");
   ellipse(cx, cy, r * 2 + 18, r * 2 + 18);
   fill("#f8f9ff");
   ellipse(cx, cy, r * 2, r * 2);
 
-  slideObj.ensureEvaluated();
-
-  slideObj.drawCellsMicroscope(cx, cy, r);
+  slide.drawCellsMicroscope(cx, cy, r);
 
   fill(255);
   textAlign(CENTER, TOP);
-  textSize(16);
-  text(
-    "True type: Gram " + (slideObj.type === "positive" ? "+" : "\u2013") +
-      "   |   Your result: Gram " + (slideObj.observedGram === "positive" ? "+" : "\u2013"),
-    width / 2,
-    90
-  );
+  textSize(15);
+  text("Purple = Gram+, Pink = Gram–. How many did you nail?", width / 2, 90);
 
-  drawButton(width / 2 - 70, height - 80, 140, 42, "Show Score");
+  drawButton(width / 2 - 70, height - 80, 140, 42, "Show Results");
 }
 
-function drawScoreScreen() {
+function drawResults() {
   background("#17151e");
   fill(255);
   textAlign(CENTER, TOP);
-  textSize(26);
+  textSize(24);
   text("Slide Result", width / 2, 60);
 
-  slideObj.ensureEvaluated();
-
-  textSize(18);
+  textSize(16);
   text(
-    "True type: Gram " + (slideObj.type === "positive" ? "+" : "\u2013"),
+    `Correctly stained cells: ${slide.correctCount} / ${slide.cells.length}`,
     width / 2,
-    120
-  );
-  text(
-    "Your interpretation: Gram " + (slideObj.observedGram === "positive" ? "+" : "\u2013"),
-    width / 2,
-    150
+    130
   );
 
-  textSize(15);
-  text(slideObj.message, width / 2, 190, 600, 230);
-
-  let verdict = slideObj.correct ? "\u2705 Correct!" : "\u274c Not quite.";
-  textSize(22);
-  text(verdict, width / 2, 360);
+  textSize(14);
+  text(slide.feedback, width / 2, 170, 600, 230); // keep within canvas width
 
   drawButton(width / 2 - 150, height - 100, 120, 42, "Replay View");
-  drawButton(width / 2 + 30, height - 100, 120, 42, "New Slide");
+  drawButton(width / 2 + 30, height - 100, 120, 42, "Next Slide");
 }
 
 function drawButton(x, y, w, h, label) {
-  let hovered = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
-
+  let hover = mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
   noStroke();
-  fill(hovered ? "#ff9f7b" : "#ff845b");
-  rect(x, y, w, h, 12);
-
+  fill(hover ? "#ff9f7b" : "#ff845b");
+  rect(x, y, w, h, 10);
   fill(30);
   textAlign(CENTER, CENTER);
   textSize(14);
   text(label, x + w / 2, y + h / 2);
 }
 
-// ----------------- Slide & Cells -----------------
+// ---------- MODEL: SLIDE & CELLS ----------
 
 class Slide {
-  constructor(type) {
-    this.type = type;
+  constructor() {
     this.cells = [];
-    this.decolorResult = null;
-    this.observedGram = null;
-    this.correct = false;
-    this.message = "";
+    this.correctCount = 0;
+    this.feedback = "";
 
+    // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
     let slideX2 = width / 2 + (width * 0.56) / 2 - 40;
     let slideY = height / 2 + 50;
-    let slideH = height * 0.20 - 40;
+    let slideH = height * 0.2 - 40;
 
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < CELLS_PER_SLIDE; i++) {
       let x = random(slideX1, slideX2);
       let y = random(slideY - slideH / 2, slideY + slideH / 2);
 
-      let ang = random(360);
+      // microscope positions
+      let ang = random(TWO_PI);
       let radius = random(25, 160);
       let sx = cos(ang) * radius;
       let sy = sin(ang) * radius;
 
-      let morph = random() < 0.55 ? "coccus" : "rod";
+      let gram = random() < 0.5 ? "positive" : "negative";
+      let morph = random() < 0.5 ? "coccus" : "rod";
 
-      this.cells.push(new MicroBuddyCell(x, y, sx, sy, morph));
+      this.cells.push(new Cell(x, y, sx, sy, gram, morph));
     }
   }
 
-  drawCellsBench() {
-    let baseColor = this.type === "positive" ? COLORS.gramPosBase : COLORS.gramNegBase;
+  drawCellsBench(step) {
     for (let c of this.cells) {
-      c.drawOnSlide(baseColor);
+      c.drawBench(step);
     }
   }
 
   drawCellsMicroscope(cx, cy, r) {
-    let gramColor = this.getObservedColor();
     for (let c of this.cells) {
       let px = cx + c.scopeX;
       let py = cy + c.scopeY;
       if (dist(px, py, cx, cy) < r - 8) {
-        c.drawInScope(px, py, gramColor);
+        c.drawMicroscope(px, py);
       }
     }
   }
 
-  setDecolorFromGauge(g) {
-    if (g < GAUGE_MIN) this.decolorResult = "under";
-    else if (g > GAUGE_MAX) this.decolorResult = "over";
-    else this.decolorResult = "good";
-  }
+  applyDecolorAndSafranin() {
+    // Map gauge to qualitative level 0..1
+    let g = decolorGauge / 100;
 
-  ensureEvaluated() {
-    if (this.observedGram == null) {
-      this.evaluate();
+    // For each cell, decide final color
+    this.correctCount = 0;
+
+    for (let c of this.cells) {
+      // Jitter per cell so it's not perfectly deterministic
+      let jitter = random(-0.08, 0.08);
+      let effective = constrain(g + jitter, 0, 1);
+
+      if (c.trueGram === "positive") {
+        // Gram+: stay purple unless very strong decolorization
+        if (effective < 0.7) {
+          c.finalColor = COLORS.purple;
+        } else {
+          // over-decolorized, picks up safranin
+          c.finalColor = COLORS.pink;
+        }
+      } else {
+        // Gram–: need decent decolorization to lose purple
+        if (effective < 0.4) {
+          c.finalColor = COLORS.purple; // under-decolorized
+        } else {
+          c.finalColor = COLORS.pink;
+        }
+      }
+
+      // scoring
+      let expected = c.trueGram === "positive" ? COLORS.purple : COLORS.pink;
+      if (c.finalColor === expected) {
+        this.correctCount++;
+      }
     }
+
+    totalScore += this.correctCount;
+    totalSlides++;
+
+    this.buildFeedback(g);
   }
 
-  evaluate() {
-    let t = this.type;
-    let dec = this.decolorResult || "good";
-
-    if (t === "positive") {
-      this.observedGram = dec === "over" ? "negative" : "positive";
+  buildFeedback(g) {
+    let line;
+    if (g < GAUGE_MIN / 100) {
+      line = "You under-decolorized overall, so many Gram– buddies stayed falsely purple.";
+    } else if (g > GAUGE_MAX / 100) {
+      line = "You over-decolorized overall, so some Gram+ buddies lost their purple and turned pink.";
     } else {
-      this.observedGram = dec === "under" ? "positive" : "negative";
+      line = "Nice timing! Most Gram+ buddies stayed purple and most Gram– buddies picked up pink.";
     }
 
-    this.correct = this.observedGram === this.type;
-    this.message = this.buildMessage(t, dec);
-
-    if (!this._scored) {
-      if (this.correct) score += 100;
-      else lives = max(0, lives - 1);
-      this._scored = true;
-    }
-  }
-
-  buildMessage(t, dec) {
-    let base =
-      t === "positive"
-        ? "This slide was Gram POSITIVE (thick peptidoglycan walls that hold crystal violet)."
-        : "This slide was Gram NEGATIVE (thin wall with an outer membrane that loses crystal violet).";
-
-    let decMsg = "";
-    if (dec === "under") {
-      decMsg =
-        "You UNDER-decolorized. Extra crystal violet stayed on the slide, so Gram\u2013 buddies can look falsely Gram positive.";
-    } else if (dec === "good") {
-      decMsg =
-        "You hit the sweet spot on decolorizer. Crystal violet stayed in Gram+ cells but washed out of Gram\u2013 cells.";
-    } else if (dec === "over") {
-      decMsg =
-        "You OVER-decolorized. Even Gram+ buddies started losing their purple, making them look falsely Gram negative.";
-    }
-
-    let resultMsg = this.correct
-      ? "Your timing gave the correct Gram result for this slide."
-      : "Your timing made the slide look like the wrong Gram type.";
-
-    return base + "\n\n" + decMsg + "\n\n" + resultMsg;
-  }
-
-  getObservedColor() {
-    return this.observedGram === "positive" ? COLORS.purple : COLORS.pink;
+    this.feedback =
+      "Each MicroBuddy has a true Gram type.\n\n" +
+      "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
+      line + "\n\n" +
+      `You correctly stained ${this.correctCount} out of ${this.cells.length} cells on this slide.`;
   }
 }
 
-class MicroBuddyCell {
-  constructor(slideX, slideY, scopeX, scopeY, morph) {
-    this.slideX = slideX;
-    this.slideY = slideY;
-    this.scopeX = scopeX;
-    this.scopeY = scopeY;
-    this.morph = morph;
+class Cell {
+  constructor(x, y, sx, sy, gram, morph) {
+    this.slideX = x;
+    this.slideY = y;
+    this.scopeX = sx;
+    this.scopeY = sy;
+    this.trueGram = gram; // "positive" or "negative"
+    this.morph = morph; // "coccus" or "rod"
+    this.finalColor = null; // set after decolor + safranin
   }
 
-  drawOnSlide(baseColor) {
+  drawBuddyBody(size, colorHex) {
+    stroke(lerpColor(color(colorHex), color("#333333"), 0.45));
+    strokeWeight(size * 0.08);
+    fill(colorHex);
+
+    if (this.morph === "coccus") {
+      ellipse(0, 0, size, size);
+    } else {
+      rectMode(CENTER);
+      rect(0, 0, size * 1.2, size * 0.7, size * 0.35);
+    }
+
+    // highlight
+    noStroke();
+    fill(255, 255, 255, 70);
+    ellipse(-size * 0.25, -size * 0.25, size * 0.35, size * 0.25);
+
+    // eyes
+    let eyeOffset = this.morph === "coccus" ? size * 0.3 : size * 0.32;
+    stroke(0, 70);
+    strokeWeight(size * 0.04);
+    fill(255);
+    ellipse(-eyeOffset, -size * 0.12, size * 0.3, size * 0.3);
+    ellipse(eyeOffset, -size * 0.12, size * 0.3, size * 0.3);
+
+    noStroke();
+    fill(40);
+    ellipse(-eyeOffset, -size * 0.12, size * 0.16, size * 0.16);
+    ellipse(eyeOffset, -size * 0.12, size * 0.16, size * 0.16);
+
+    // “safety eye” glint
+    fill(255, 255, 255, 230);
+    ellipse(-eyeOffset - size * 0.06, -size * 0.17, size * 0.08, size * 0.08);
+    ellipse(eyeOffset - size * 0.06, -size * 0.17, size * 0.08, size * 0.08);
+
+    // mouth
+    stroke(40);
+    strokeWeight(size * 0.04);
+    noFill();
+    arc(0, size * 0.15, size * 0.35, size * 0.25, 0, PI);
+  }
+
+  drawBench(step) {
     push();
     translate(this.slideX, this.slideY);
 
+    // shadow
     noStroke();
     fill(0, 0, 0, 40);
     ellipse(4, 6, 26, 14);
 
-    stroke(lerpColor(color(baseColor), color("#333333"), 0.45));
-    strokeWeight(2.5);
-    fill(baseColor);
-
-    if (this.morph === "coccus") {
-      ellipse(0, 0, 26, 26);
+    // choose color by step
+    let colorHex;
+    if (step === "crystal" || step === "iodine" || step === "decolor") {
+      colorHex = COLORS.purple; // all purple after CV+iodine
+    } else if (step === "safranin") {
+      // show final colors if already decided
+      colorHex = this.finalColor || COLORS.purple;
     } else {
-      rectMode(CENTER);
-      rect(0, 0, 32, 18, 9);
+      // base, before staining
+      colorHex = this.trueGram === "positive" ? COLORS.neutralPos : COLORS.neutralNeg;
     }
 
-    noStroke();
-    fill(255, 255, 255, 60);
-    ellipse(-6, -6, 10, 7);
-
-    let ex = this.morph === "coccus" ? 8 : 9;
-    stroke(0, 70);
-    strokeWeight(1.5);
-    fill(255);
-    ellipse(-ex, -3, 7.5, 7.5);
-    ellipse(ex, -3, 7.5, 7.5);
-
-    noStroke();
-    fill(40);
-    ellipse(-ex, -3, 4, 4);
-    ellipse(ex, -3, 4, 4);
-
-    fill(255, 255, 255, 220);
-    ellipse(-ex - 1, -4, 2, 2);
-    ellipse(ex - 1, -4, 2, 2);
-
-    stroke(40);
-    strokeWeight(1.6);
-    noFill();
-    arc(0, 3, 8, 5, 0, 180);
-
+    this.drawBuddyBody(26, colorHex);
     pop();
   }
 
-  drawInScope(px, py, gramColor) {
+  drawMicroscope(px, py) {
     push();
     translate(px, py);
 
-    stroke(lerpColor(color(gramColor), color("#121212"), 0.5));
-    strokeWeight(2.3);
-    fill(gramColor);
-
-    if (this.morph === "coccus") {
-      ellipse(0, 0, 32, 32);
-    } else {
-      rectMode(CENTER);
-      rect(0, 0, 40, 22, 11);
-    }
-
-    noStroke();
-    fill(255, 255, 255, 80);
-    ellipse(-7, -7, 12, 9);
-
-    let ex = this.morph === "coccus" ? 9 : 10;
-    stroke(0, 80);
-    strokeWeight(2);
-    fill(255);
-    ellipse(-ex, -4, 9, 9);
-    ellipse(ex, -4, 9, 9);
-
-    noStroke();
-    fill(30);
-    ellipse(-ex, -4, 4.2, 4.2);
-    ellipse(ex, -4, 4.2, 4.2);
-
-    fill(255, 255, 255, 220);
-    ellipse(-ex - 1, -5, 2.4, 2.4);
-    ellipse(ex - 1, -5, 2.4, 2.4);
-
-    stroke(30);
-    strokeWeight(1.8);
-    noFill();
-    arc(0, 4, 10, 6, 0, 180);
+    let colorHex = this.finalColor || COLORS.purple;
+    this.drawBuddyBody(32, colorHex);
 
     pop();
   }
 }
 
-// ----------------- Input -----------------
+// ---------- INPUT ----------
 
 function mousePressed() {
-  if (mode === "stain") {
+  if (gameState === "stain") {
+    // reagent clicks
     for (let r of reagents) {
       if (r.isMouseOver()) {
         handleReagentClick(r.id);
         return;
       }
     }
-  } else if (mode === "decolor") {
-    if (isMouseOnSlideArea()) {
+  } else if (gameState === "decolor") {
+    if (isMouseOnSlide()) {
       isPouring = true;
     }
-  } else if (mode === "microscope") {
+  } else if (gameState === "microscope") {
+    // "Show Results" button
     if (isMouseOverButton(width / 2 - 70, height - 80, 140, 42)) {
-      mode = "score";
+      gameState = "results";
     }
-  } else if (mode === "score") {
+  } else if (gameState === "results") {
     if (isMouseOverButton(width / 2 - 150, height - 100, 120, 42)) {
-      mode = "microscope";
+      gameState = "microscope";
     } else if (isMouseOverButton(width / 2 + 30, height - 100, 120, 42)) {
-      slideNumber++;
       startNewSlide();
     }
   }
 }
 
 function mouseReleased() {
-  if (mode === "decolor" && isPouring) {
+  if (gameState === "decolor" && isPouring) {
     isPouring = false;
-    slideObj.setDecolorFromGauge(decolorGauge);
-    currentStepIndex = 3;
-    mode = "stain";
+    // finalize cell colors based on gauge
+    slide.applyDecolorAndSafranin();
+    // move to saf step
+    currentStep = 3; // saf
+    gameState = "stain";
   }
 }
 
 function handleReagentClick(id) {
-  let expected = steps[currentStepIndex];
+  let expected = steps[currentStep];
   if (id !== expected) return;
 
-  if (id === "crystal") currentStepIndex++;
-  else if (id === "iodine") currentStepIndex++;
-  else if (id === "decolor") {
-    mode = "decolor";
+  if (id === "crystal" || id === "iodine") {
+    currentStep++;
+  } else if (id === "decolor") {
+    gameState = "decolor";
     decolorGauge = 0;
     isPouring = false;
   } else if (id === "safranin") {
-    currentStepIndex++;
-    slideObj.ensureEvaluated();
-    mode = "microscope";
+    // after saf, go to microscope
+    gameState = "microscope";
   }
 }
 
-function isMouseOnSlideArea() {
+function isMouseOnSlide() {
   let wSlide = width * 0.56;
-  let hSlide = height * 0.20;
+  let hSlide = height * 0.2;
   let cx = width / 2;
   let cy = height / 2 + 50;
 
@@ -610,7 +565,7 @@ function isMouseOverButton(x, y, w, h) {
   return mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h;
 }
 
-// ----------------- Reagent Buttons -----------------
+// ---------- REAGENT BUTTONS ----------
 
 class ReagentButton {
   constructor(x, y, id, label, colorHex) {
@@ -627,7 +582,7 @@ class ReagentButton {
     push();
     translate(this.x, this.y);
 
-    let enabled = isCurrent && mode === "stain";
+    let enabled = isCurrent && gameState === "stain";
     let hovered = enabled && this.isMouseOver();
 
     if (enabled) {
@@ -639,28 +594,27 @@ class ReagentButton {
     stroke(COLORS.bottleOutline);
     strokeWeight(isCurrent ? 3 : 2);
     let c = color(this.colorHex);
-    if (!enabled && !isDone) {
-      c = lerpColor(c, color("#cccccc"), 0.4);
-    }
+    if (!enabled && !isDone) c = lerpColor(c, color("#cccccc"), 0.4);
     fill(c);
     rectMode(CENTER);
-    rect(0, 60, this.w * 0.7, this.h * 0.65, 18);
+    rect(0, 60, this.w * 0.7, this.h * 0.65, 18); // body
+    rect(0, 25, this.w * 0.35, this.h * 0.22, 10); // neck
 
-    rect(0, 25, this.w * 0.35, this.h * 0.22, 10);
-
+    // label
     noStroke();
     fill(255, enabled ? 240 : 190);
     rect(0, 65, this.w * 0.48, this.h * 0.24, 8);
 
+    // face
     fill(40);
     ellipse(-14, 60, 7, 7);
     ellipse(14, 60, 7, 7);
-
     noFill();
     stroke(40);
     strokeWeight(1.5);
     arc(0, 69, 12, 6, 0, 180);
 
+    // text
     noStroke();
     fill(40);
     textAlign(CENTER, CENTER);
