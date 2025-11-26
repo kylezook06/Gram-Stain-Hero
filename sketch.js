@@ -33,6 +33,13 @@ const CV_SOAK_GOAL_SEC = 3; // seconds you should hold once fully flooded
 const CV_RINSE_PROGRESS_GOAL = 100; // arbitrary progress units before rinse is considered complete
 const CV_RINSE_HARSH_TARGET = 6; // higher values = harsher rinse penalty threshold
 
+// Iodine mini-game tuning
+const IO_GRID_COLS = 16;
+const IO_GRID_ROWS = 5;
+const IO_SOAK_GOAL_SEC = 1.6; // shorter soak than crystal violet
+const IO_RINSE_PROGRESS_GOAL = 80;
+const IO_RINSE_HARSH_TARGET = 5;
+
 // ---------- GLOBAL STATE ----------
 
 // Overall state machine walks through: smear prep -> heat-fix -> staining flow -> microscope -> results
@@ -55,6 +62,17 @@ let cvRinseHarshness = 0;
 let cvTilt = -24; // degrees, negative tilts left for runoff
 let isCvPouring = false;
 let isCvRinsing = false;
+
+// Iodine mini-game state
+let ioGrid;
+let ioCoverage = 0;
+let ioSoakTime = 0;
+let ioStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
+let ioRinseProgress = 0;
+let ioRinseHarshness = 0;
+let ioTilt = -18;
+let isIoPouring = false;
+let isIoRinsing = false;
 
 // Smear + heat-fix data
 const GRID_COLS = 18;
@@ -85,6 +103,7 @@ function startNewSlide() {
   isPouring = false;
   decolorGauge = 0;
   initCrystalStage();
+  initIodineStage();
   initSmearGrid();
   heat = 0;
   isHeating = false;
@@ -128,6 +147,10 @@ function draw() {
   } else if (gameState === "crystal") {
     drawSlideBench();
     drawCrystalStep();
+    drawStatusBar();
+  } else if (gameState === "iodine") {
+    drawSlideBench();
+    drawIodineStep();
     drawStatusBar();
   } else if (gameState === "stain" || gameState === "decolor") {
     drawSlideBench();
@@ -191,7 +214,12 @@ function drawHeader() {
 function drawSlideBench() {
   const slideCx = width / 2;
   const slideCy = height / 2 + 50;
-  const tiltAngle = gameState === "crystal" && cvStage === "rinse" ? cvTilt * 0.35 : 0; // gentle visual tilt
+  const tiltAngle =
+    gameState === "crystal" && cvStage === "rinse"
+      ? cvTilt * 0.35
+      : gameState === "iodine" && ioStage === "rinse"
+        ? ioTilt * 0.35
+        : 0; // gentle visual tilt
 
   // Slide with optional ghost tilt overlay to show rinse angle
   push();
@@ -250,6 +278,10 @@ function drawStatusBar() {
     if (cvStage === "flood") msg = "Flood the smear with crystal violet until the outline is solid.";
     else if (cvStage === "soak") msg = "Keep it covered while the soak timer finishes.";
     else if (cvStage === "rinse") msg = "Hold to rinse; tilt with ◀ ▶ / A-D so water runs off gently.";
+  } else if (gameState === "iodine") {
+    if (ioStage === "flood") msg = "Flood with iodine until the outline is solid.";
+    else if (ioStage === "soak") msg = "Hold coverage for the quick iodine lock-in.";
+    else if (ioStage === "rinse") msg = "Hold to rinse gently; tilt with ◀ ▶ / A-D to keep flow off the smear.";
   } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
@@ -455,6 +487,235 @@ function initCrystalStage() {
   cvTilt = -24;
   isCvPouring = false;
   isCvRinsing = false;
+}
+
+// ---------- IODINE MINI-GAME ----------
+
+function initIodineStage() {
+  ioGrid = [];
+  for (let y = 0; y < IO_GRID_ROWS; y++) {
+    ioGrid[y] = [];
+    for (let x = 0; x < IO_GRID_COLS; x++) ioGrid[y][x] = 0;
+  }
+  ioCoverage = 0;
+  ioSoakTime = 0;
+  ioStage = "flood";
+  ioRinseProgress = 0;
+  ioRinseHarshness = 0;
+  ioTilt = -18;
+  isIoPouring = false;
+  isIoRinsing = false;
+}
+
+function drawIodineStep() {
+  progressIoSoak();
+  drawIodineOverlay();
+  drawIodineHUD();
+  drawIodinePrompts();
+}
+
+function drawIodineOverlay() {
+  let area = getSlidePaintArea(IO_GRID_COLS, IO_GRID_ROWS);
+  noStroke();
+  for (let gy = 0; gy < IO_GRID_ROWS; gy++) {
+    for (let gx = 0; gx < IO_GRID_COLS; gx++) {
+      let t = ioGrid?.[gy]?.[gx] ?? 0;
+      if (t > 0) {
+        let alpha = constrain(50 + t * 40, 50, 180);
+        fill(194, 142, 27, alpha);
+        rect(area.x + gx * area.cw, area.y + gy * area.ch, area.cw, area.ch, 5);
+      }
+    }
+  }
+
+  noFill();
+  stroke(ioCoverage >= 0.95 ? color("#c28e1b") : color(130, 100));
+  strokeWeight(3);
+  rect(area.x - 4, area.y - 4, area.cw * IO_GRID_COLS + 8, area.ch * IO_GRID_ROWS + 8, 10);
+
+  if (ioStage === "soak" || ioStage === "rinse") {
+    drawIoSoakBar();
+  }
+
+  if (ioStage === "rinse") {
+    updateIoRinse();
+    drawIoRinseHUD();
+  }
+}
+
+function drawIoSoakBar() {
+  const barW = 240;
+  const barH = 14;
+  const x = width / 2 - barW / 2;
+  const y = height / 2 + 130;
+  const progress = constrain(ioSoakTime / IO_SOAK_GOAL_SEC, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(x - 2, y - 2, barW + 4, barH + 4, 8);
+
+  fill("#f3d89c");
+  rect(x, y, barW * progress, barH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(x, y, barW, barH, 8);
+
+  noStroke();
+  fill(40);
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  text("Iodine lock-in", width / 2, y - 6);
+}
+
+function drawIoRinseHUD() {
+  const progressW = 300;
+  const progressH = 14;
+  const px = width / 2 - progressW / 2;
+  const py = height / 2 + 160;
+  const progress = constrain(ioRinseProgress / IO_RINSE_PROGRESS_GOAL, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(px - 2, py - 2, progressW + 4, progressH + 4, 8);
+
+  fill("#cde6ff");
+  rect(px, py, progressW * progress, progressH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(px, py, progressW, progressH, 8);
+
+  const arrowY = height / 2 + 40;
+  const arrowX = width / 2;
+  stroke(40, 200);
+  strokeWeight(3);
+  line(arrowX - 60, arrowY, arrowX + 60, arrowY);
+  push();
+  translate(arrowX, arrowY);
+  rotate(ioTilt);
+  stroke(40);
+  fill("#ffe8c4");
+  triangle(-14, -8, 14, 0, -14, 8);
+  pop();
+
+  textAlign(CENTER, BOTTOM);
+  textSize(13);
+  fill(40);
+  const harsh = ioRinseHarshness.toFixed(1);
+  text(
+    `Rinse harshness: ${harsh}   Progress: ${Math.floor(progress * 100)}%`,
+    width / 2,
+    py - 8
+  );
+
+  // gentle rinse warning
+  if (ioRinseHarshness > IO_RINSE_HARSH_TARGET * 0.9) {
+    fill(200, 80, 40);
+    textAlign(CENTER, TOP);
+    text("Too flat! Tilt more to keep iodine from blasting cells off.", width / 2, py + 24);
+  } else {
+    fill(40);
+    textAlign(CENTER, TOP);
+    text("Tilt with ◀ ▶ or A/D to guide rinse runoff", width / 2, py + 24);
+  }
+}
+
+function drawIodineHUD() {
+  const coveragePct = floor(ioCoverage * 100);
+  const boxW = 360;
+  const boxH = 70;
+  const boxX = width / 2 - boxW / 2;
+  const boxY = height / 2 + 90;
+  fill(0, 0, 0, 45);
+  noStroke();
+  rect(boxX, boxY, boxW, boxH, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  let line1 = `Coverage: ${coveragePct}%`;
+  let line2 = "";
+  if (ioStage === "flood") line2 = "Click/drag to flood with iodine.";
+  if (ioStage === "soak") line2 = "Hold coverage for a quick lock-in.";
+  if (ioStage === "rinse") line2 = "Hold to rinse; tilt with ◀ ▶ / A-D for gentle flow.";
+  text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
+}
+
+function drawIodinePrompts() {
+  if (ioStage === "soak" && ioSoakTime >= IO_SOAK_GOAL_SEC) {
+    drawActionButton(width / 2 - 90, height - 120, 180, 38, "Start Iodine Rinse");
+  } else if (ioStage === "rinse") {
+    if (!isIoRinsing) {
+      drawActionButton(width / 2 - 100, height - 120, 200, 38, "Hold on slide to rinse");
+    }
+    if (ioRinseProgress >= IO_RINSE_PROGRESS_GOAL && !isIoRinsing) {
+      drawActionButton(width / 2 - 90, height - 70, 180, 38, "Finish Iodine Step");
+    }
+  }
+}
+
+function updateIoRinse() {
+  if (ioStage !== "rinse") return;
+
+  if (isIoRinsing) {
+    const frameScale = deltaTime / 16.67;
+    const tiltSafety = constrain(abs(ioTilt) / 28, 0, 1);
+
+    const harshIncrement = (0.4 + (1 - tiltSafety) * 0.95) * frameScale;
+    ioRinseHarshness += harshIncrement;
+
+    const progressIncrement = (1 + tiltSafety * 0.65) * frameScale;
+    ioRinseProgress = min(ioRinseProgress + progressIncrement, IO_RINSE_PROGRESS_GOAL);
+  }
+
+  if (ioRinseProgress >= IO_RINSE_PROGRESS_GOAL && !isIoRinsing) {
+    finishIodineStep();
+  }
+}
+
+function paintIodineAt(mx, my) {
+  let area = getSlidePaintArea(IO_GRID_COLS, IO_GRID_ROWS);
+  if (mx < area.x || mx > area.x + area.cw * IO_GRID_COLS) return;
+  if (my < area.y || my > area.y + area.ch * IO_GRID_ROWS) return;
+
+  let gx = floor((mx - area.x) / area.cw);
+  let gy = floor((my - area.y) / area.ch);
+  if (gx >= 0 && gx < IO_GRID_COLS && gy >= 0 && gy < IO_GRID_ROWS) {
+    ioGrid[gy][gx] = min(ioGrid[gy][gx] + 1, 5);
+    computeIoCoverage();
+    if (ioCoverage >= 0.95 && ioStage === "flood") {
+      ioStage = "soak";
+    }
+  }
+}
+
+function computeIoCoverage() {
+  let filled = 0;
+  for (let y = 0; y < IO_GRID_ROWS; y++) {
+    for (let x = 0; x < IO_GRID_COLS; x++) {
+      if ((ioGrid?.[y]?.[x] ?? 0) > 0) filled++;
+    }
+  }
+  ioCoverage = filled / (IO_GRID_COLS * IO_GRID_ROWS);
+}
+
+function progressIoSoak() {
+  if (ioStage === "soak" && ioCoverage >= 0.95) {
+    ioSoakTime += deltaTime / 1000;
+    if (ioSoakTime > IO_SOAK_GOAL_SEC * 1.5) {
+      ioStage = "rinse";
+    }
+  }
+}
+
+function finishIodineStep() {
+  slide.setIodineStats(ioCoverage, ioSoakTime, ioRinseHarshness, ioRinseProgress);
+  ioStage = "done";
+  currentStep++;
+  gameState = "stain";
 }
 
 function drawCrystalStep() {
@@ -749,6 +1010,10 @@ class Slide {
     this.cvSoakTime = 0;
     this.cvRinseHarshness = 0;
     this.cvRinseProgress = 0;
+    this.ioCoverage = 0;
+    this.ioSoakTime = 0;
+    this.ioRinseHarshness = 0;
+    this.ioRinseProgress = 0;
 
     // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
@@ -774,7 +1039,7 @@ class Slide {
   }
 
   drawCellsBench(step, tiltAngle = 0) {
-    const tiltActive = tiltAngle !== 0 && gameState === "crystal" && cvStage === "rinse";
+    const tiltActive = tiltAngle !== 0 && (gameState === "crystal" || gameState === "iodine") ;
     if (tiltActive) {
       const cx = width / 2;
       const cy = height / 2 + 50;
@@ -824,6 +1089,13 @@ class Slide {
     this.cvRinseProgress = rinseProgress;
   }
 
+  setIodineStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+    this.ioCoverage = coverage;
+    this.ioSoakTime = soakSeconds;
+    this.ioRinseHarshness = rinseHarshness;
+    this.ioRinseProgress = rinseProgress;
+  }
+
   applyDecolorAndSafranin() {
     // Map gauge to qualitative level 0..1
     let g = decolorGauge / 100;
@@ -832,6 +1104,8 @@ class Slide {
     const heatQuality = getHeatQuality(this.heatLevel);
     const cvBinding = this.getCrystalBindingQuality();
     const rinseAdequacy = constrain(this.cvRinseProgress / CV_RINSE_PROGRESS_GOAL, 0, 1);
+    const iodineLock = this.getIodineLockQuality();
+    const iodineRinsePenalty = constrain(this.ioRinseHarshness / IO_RINSE_HARSH_TARGET, 0, 1);
 
     // For each cell, decide final color
     this.correctCount = 0;
@@ -843,9 +1117,9 @@ class Slide {
 
     for (let c of this.cells) {
       // Start with a healthy baseline so a perfect smear/heat/flood keeps most buddies alive.
-      const prepQuality = smearQuality * heatQuality * cvBinding;
+      const prepQuality = smearQuality * heatQuality * cvBinding * (0.75 + 0.25 * iodineLock);
       const survivalProb = constrain(
-        0.2 + prepQuality * (1 - 0.6 * harshPenalty),
+        0.2 + prepQuality * (1 - 0.6 * harshPenalty) * (1 - 0.35 * iodineRinsePenalty),
         0,
         1
       );
@@ -859,7 +1133,11 @@ class Slide {
 
       // Jitter per cell so it's not perfectly deterministic
       let jitter = random(-0.08, 0.08);
-      let effective = constrain(g + jitter + map(rinseAdequacy, 0, 1, -0.2, 0.05), 0, 1);
+      let effective = constrain(
+        g + jitter + map(rinseAdequacy, 0, 1, -0.2, 0.05) + (1 - iodineLock) * 0.25,
+        0,
+        1
+      );
 
       if (c.trueGram === "positive") {
         // Gram+: stay purple unless very strong decolorization
@@ -905,7 +1183,7 @@ class Slide {
       "Each MicroBuddy has a true Gram type.\n\n" +
       "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
       line + "\n\n" +
-      this.getCrystalNote() +
+      this.getCrystalNote() + this.getIodineNote() +
       `You correctly stained ${this.correctCount} out of ${this.aliveCount || this.cells.length} visible cells on this slide.`;
   }
 
@@ -924,6 +1202,24 @@ class Slide {
     const rinseText = this.cvRinseHarshness > CV_RINSE_HARSH_TARGET
       ? "Rinse was harsh and knocked off some cells."
       : "Gentle rinse kept most cells on the slide.";
+    return `${soakText} ${rinseText}\n\n`;
+  }
+
+  getIodineLockQuality() {
+    const coverageFactor = constrain(this.ioCoverage, 0, 1);
+    const soakFactor = constrain(this.ioSoakTime / IO_SOAK_GOAL_SEC, 0, 1);
+    const rinsePenalty = constrain(this.ioRinseHarshness / IO_RINSE_HARSH_TARGET, 0, 1);
+    const base = constrain(0.35 + 0.45 * coverageFactor + 0.3 * soakFactor, 0, 1);
+    return constrain(base - rinsePenalty * 0.35, 0.1, 1);
+  }
+
+  getIodineNote() {
+    const soakText = this.ioSoakTime >= IO_SOAK_GOAL_SEC
+      ? `Iodine lock-in time: ${this.ioSoakTime.toFixed(1)}s.`
+      : `Iodine soak was short (${this.ioSoakTime.toFixed(1)}s).`;
+    const rinseText = this.ioRinseHarshness > IO_RINSE_HARSH_TARGET
+      ? "Iodine rinse was rough and loosened some stain."
+      : "Iodine rinse stayed gentle, keeping Gram+ stain locked in.";
     return `${soakText} ${rinseText}\n\n`;
   }
 }
@@ -1055,6 +1351,25 @@ function mousePressed() {
         isCvRinsing = true;
       }
     }
+  } else if (gameState === "iodine") {
+    if (ioStage === "soak" && ioSoakTime >= IO_SOAK_GOAL_SEC &&
+        isMouseOverButton(width / 2 - 90, height - 120, 180, 38)) {
+      ioStage = "rinse";
+      return;
+    }
+    if (ioStage === "rinse" && ioRinseProgress >= IO_RINSE_PROGRESS_GOAL &&
+        isMouseOverButton(width / 2 - 90, height - 70, 180, 38)) {
+      finishIodineStep();
+      return;
+    }
+    if (isMouseOnSlide()) {
+      if (ioStage === "flood" || ioStage === "soak") {
+        isIoPouring = true;
+        paintIodineAt(mouseX, mouseY);
+      } else if (ioStage === "rinse") {
+        isIoRinsing = true;
+      }
+    }
   } else if (gameState === "stain") {
     // reagent clicks
     for (let r of reagents) {
@@ -1097,6 +1412,10 @@ function mouseReleased() {
     isCvPouring = false;
     isCvRinsing = false;
   }
+  if (gameState === "iodine") {
+    isIoPouring = false;
+    isIoRinsing = false;
+  }
 }
 
 function mouseDragged() {
@@ -1111,6 +1430,8 @@ function mouseDragged() {
     }
   } else if (gameState === "crystal" && isMouseOnSlide() && (cvStage === "flood" || cvStage === "soak") && isCvPouring) {
     paintCrystalAt(mouseX, mouseY);
+  } else if (gameState === "iodine" && isMouseOnSlide() && (ioStage === "flood" || ioStage === "soak") && isIoPouring) {
+    paintIodineAt(mouseX, mouseY);
   }
 }
 
@@ -1121,7 +1442,7 @@ function handleReagentClick(id) {
   if (id === "crystal") {
     gameState = "crystal";
   } else if (id === "iodine") {
-    currentStep++;
+    gameState = "iodine";
   } else if (id === "decolor") {
     gameState = "decolor";
     decolorGauge = 0;
@@ -1157,6 +1478,13 @@ function keyPressed() {
     }
     if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') {
       cvTilt = min(32, cvTilt + 3);
+    }
+  } else if (gameState === "iodine" && ioStage === "rinse") {
+    if (keyCode === LEFT_ARROW || key === 'a' || key === 'A') {
+      ioTilt = max(-30, ioTilt - 3);
+    }
+    if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') {
+      ioTilt = min(30, ioTilt + 3);
     }
   }
 }
