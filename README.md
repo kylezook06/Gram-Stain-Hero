@@ -1,14 +1,15 @@
 # Gram-Stain-Hero
 
-MicroBuddyz-style Gram staining mini-game built with p5.js. A lab bench scene, reagent bottle buddies, and Gram+ / Gram– MicroBuddy cells help teach the classic stain order: crystal violet → iodine → decolorizer → safranin.
+MicroBuddyz-style Gram staining mini-game built with p5.js. Work through crystal violet → iodine → a timing-based decolorizer rinse → safranin, then read your slide in the microscope to see if you called the Gram reaction correctly.
 
 ## Try it locally
 1. Open `index.html` in a browser (no build step required).
-2. Click the reagent bottle buddies in order to stain the cells. Gram+ cocci stay purple after decolorizing; Gram– rods lose the violet and pick up the safranin pink.
+2. Click the reagent bottle buddies in order. Time the decolorizer in the green zone, then finish with safranin and check the microscope.
 
 ## What's included
-- **MicroBuddy cells:** cute cocci and rods with safety eyes, soft shading, and highlights.
-- **Reagent bottle buddies:** clickable buttons with labels and step numbers for each stain.
-- **Lab bench layout:** slide in the center, status bar at the bottom explaining each step.
+- **MicroBuddy cells:** plush cocci and rods with safety eyes and soft shading on both the bench view and microscope view.
+- **Reagent bottle buddies:** clickable bottles with hover/active states, step gating, and completion checkmarks.
+- **Lab bench & microscope layout:** warm palette, slide shadows, decolorizer gauge mini-game, microscope readout, and score/replay screen.
+- **Gameplay loop:** each slide randomizes Gram+ or Gram– cells, applies your decolorization quality (under/good/over), and explains how that affected your interpretation.
 
-Use this as a starter sketch and grow it into a full Gram stain flow with timers, rinses, and microscope views.
+Paste the included `sketch.js` into editor.p5js.org to iterate further, or tweak the HTML/CSS locally to fit your lesson plan.
