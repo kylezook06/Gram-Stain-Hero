@@ -28,7 +28,8 @@ const GAUGE_MAX = 75; // "good" high bound
 
 // ---------- GLOBAL STATE ----------
 
-let gameState = "stain"; // "stain", "decolor", "microscope", "results"
+// Overall state machine walks through: smear prep -> heat-fix -> staining flow -> microscope -> results
+let gameState = "smear"; // "smear", "heatFix", "stain", "decolor", "microscope", "results"
 let steps = ["crystal", "iodine", "decolor", "safranin"];
 let currentStep = 0;
 
@@ -36,6 +37,16 @@ let reagents = [];
 let slide;
 let isPouring = false;
 let decolorGauge = 0;
+
+// Smear + heat-fix data
+const GRID_COLS = 18;
+const GRID_ROWS = 6;
+let smearGrid;
+let smearCoverage = 0;
+let smearOverload = 0;
+
+let heat = 0;
+let isHeating = false;
 
 let totalScore = 0;
 let totalSlides = 0;
@@ -52,9 +63,12 @@ function startNewSlide() {
   slide = new Slide();
   reagents = [];
   currentStep = 0;
-  gameState = "stain";
+  gameState = "smear";
   isPouring = false;
   decolorGauge = 0;
+  initSmearGrid();
+  heat = 0;
+  isHeating = false;
 
   const labels = [
     { id: "crystal", name: "Crystal Violet", color: COLORS.purple },
@@ -63,12 +77,12 @@ function startNewSlide() {
     { id: "safranin", name: "Safranin", color: COLORS.pink }
   ];
 
-  let startX = 110;
+  const offsets = [-270, -90, 90, 270];
   for (let i = 0; i < labels.length; i++) {
     reagents.push(
       new ReagentButton(
-        startX + i * 200,
-        80,
+        width / 2 + offsets[i],
+        90,
         labels[i].id,
         labels[i].name,
         labels[i].color
@@ -84,7 +98,15 @@ function draw() {
   drawTable();
   drawHeader();
 
-  if (gameState === "stain" || gameState === "decolor") {
+  if (gameState === "smear") {
+    drawSlideBench();
+    drawSmearStep();
+    drawStatusBar();
+  } else if (gameState === "heatFix") {
+    drawSlideBench();
+    drawHeatFixStep();
+    drawStatusBar();
+  } else if (gameState === "stain" || gameState === "decolor") {
     drawSlideBench();
     drawReagents();
     drawStatusBar();
@@ -112,19 +134,23 @@ function drawTable() {
 
 function drawHeader() {
   fill(COLORS.textDark);
-  textAlign(LEFT, CENTER);
-  textSize(20);
-  text("MicroBuddyz Gram Stain Hero", 40, 35);
+  textAlign(CENTER, CENTER);
+  textSize(22);
+  text("MicroBuddyz Gram Stain Hero", width / 2, 32);
 
-  textSize(13);
-  let stepName = steps[currentStep] || "done";
+  textSize(14);
   let sub = "";
-  if (stepName === "crystal") sub = "Step 1 – Crystal Violet (primary stain)";
-  if (stepName === "iodine") sub = "Step 2 – Iodine (mordant)";
-  if (stepName === "decolor") sub = "Step 3 – Decolorizer (timing matters!)";
-  if (stepName === "safranin") sub = "Step 4 – Safranin (counterstain)";
+  if (gameState === "smear") sub = "Step 0 – Smear prep: paint an even layer.";
+  else if (gameState === "heatFix") sub = "Step 0.5 – Heat fix: pass through the flame to stick cells.";
+  else {
+    let stepName = steps[currentStep] || "done";
+    if (stepName === "crystal") sub = "Step 1 – Crystal Violet (primary stain)";
+    if (stepName === "iodine") sub = "Step 2 – Iodine (mordant)";
+    if (stepName === "decolor") sub = "Step 3 – Decolorizer (timing matters!)";
+    if (stepName === "safranin") sub = "Step 4 – Safranin (counterstain)";
+  }
   fill(80, 90);
-  text(sub, 40, 60);
+  text(sub, width / 2, 58);
 
   // Simple total score HUD
   textAlign(RIGHT, CENTER);
@@ -178,7 +204,11 @@ function drawStatusBar() {
   textAlign(CENTER, CENTER);
   textSize(16);
   let msg = "";
-  if (gameState === "stain") {
+  if (gameState === "smear") {
+    msg = "Click and drag to paint an even smear. Avoid thick blobs.";
+  } else if (gameState === "heatFix") {
+    msg = "Hold on the slide over the flame; stay in the green heat zone.";
+  } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
     if (s === "iodine") msg = "Click IODINE to lock in the purple stain.";
@@ -221,6 +251,139 @@ function drawDecolorGauge() {
   textAlign(CENTER, BOTTOM);
   textSize(12);
   text("Decolorizer Flow", width / 2, y - 5);
+}
+
+// ---------- SMEAR + HEAT-FIX MINI-GAMES ----------
+
+function initSmearGrid() {
+  smearGrid = [];
+  for (let y = 0; y < GRID_ROWS; y++) {
+    smearGrid[y] = [];
+    for (let x = 0; x < GRID_COLS; x++) smearGrid[y][x] = 0;
+  }
+  smearCoverage = 0;
+  smearOverload = 0;
+}
+
+function computeSmearStats() {
+  const total = GRID_COLS * GRID_ROWS;
+  let covered = 0;
+  let overloaded = 0;
+  for (let y = 0; y < GRID_ROWS; y++) {
+    for (let x = 0; x < GRID_COLS; x++) {
+      let t = smearGrid[y][x];
+      if (t > 0) covered++;
+      if (t > 3) overloaded++;
+    }
+  }
+  smearCoverage = covered / total;
+  smearOverload = overloaded / total;
+}
+
+function drawSmearStep() {
+  drawSmearPaint();
+
+  const coveragePct = floor(smearCoverage * 100);
+  const overloadPct = floor(smearOverload * 100);
+
+  // Status box
+  fill(0, 0, 0, 50);
+  noStroke();
+  rect(width / 2 - 150, height / 2 + 120, 300, 60, 10);
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  text(`Coverage: ${coveragePct}%   Thick spots: ${overloadPct}%`, width / 2, height / 2 + 150);
+
+  drawActionButton(width / 2 - 70, height - 120, 140, 36, "Finish Smear");
+}
+
+function drawSmearPaint() {
+  // smear overlay based on grid thickness
+  let sx = width / 2 - (width * 0.56) / 2 + 24;
+  let sy = height / 2 + 50 - (height * 0.2) / 2 + 12;
+  let cw = (width * 0.56 - 48) / GRID_COLS;
+  let ch = (height * 0.2 - 24) / GRID_ROWS;
+
+  noStroke();
+  for (let gy = 0; gy < GRID_ROWS; gy++) {
+    for (let gx = 0; gx < GRID_COLS; gx++) {
+      let t = smearGrid?.[gy]?.[gx] ?? 0;
+      if (t > 0) {
+        let alpha = constrain(40 + t * 35, 40, 170);
+        fill(120, 80, 160, alpha);
+        rect(sx + gx * cw, sy + gy * ch, cw, ch, 4);
+      }
+    }
+  }
+}
+
+function finalizeSmear() {
+  computeSmearStats();
+  slide.setSmearStats(smearCoverage, smearOverload);
+  gameState = "heatFix";
+}
+
+function drawHeatFixStep() {
+  drawFlame();
+
+  // Thermometer
+  const barX = width - 80;
+  const barY = height / 2 + 40;
+  const barH = 220;
+  stroke(0, 50);
+  strokeWeight(2);
+  noFill();
+  rect(barX, barY - barH / 2, 24, barH, 8);
+
+  noStroke();
+  fill(140, 240, 140, 160);
+  const targetMin = 40;
+  const targetMax = 72;
+  let ty1 = map(targetMax, 0, 100, barY + barH / 2, barY - barH / 2);
+  let ty2 = map(targetMin, 0, 100, barY + barH / 2, barY - barH / 2);
+  rect(barX + 2, ty1, 20, ty2 - ty1, 6);
+
+  fill(255, 110, 120, 220);
+  let hy = map(heat, 0, 100, barY + barH / 2, barY - barH / 2);
+  rect(barX + 2, hy, 20, barY + barH / 2 - hy, 6);
+
+  fill(0, 80);
+  textAlign(CENTER, CENTER);
+  textSize(12);
+  text("Heat", barX + 12, barY - barH / 2 - 12);
+
+  drawActionButton(width / 2 - 90, height - 120, 180, 38, "Done Heat-Fix");
+}
+
+function drawFlame() {
+  push();
+  translate(width / 2, height / 2 + 160);
+  noStroke();
+  fill(30, 144, 255, 160);
+  ellipse(0, 0, 180, 30);
+  fill(255, 190, 80, 180);
+  triangle(-20, 0, 0, -60, 20, 0);
+  pop();
+
+  if (isHeating) {
+    heat = min(100, heat + 0.7);
+  } else {
+    heat = max(0, heat - 0.35);
+  }
+}
+
+function finalizeHeatFix() {
+  slide.setHeatLevel(heat);
+  gameState = "stain";
+}
+
+function getHeatQuality(level) {
+  const ideal = 56;
+  const tolerance = 24;
+  const delta = abs(level - ideal);
+  const penalty = constrain(delta / tolerance, 0, 1);
+  return constrain(1 - penalty * 0.6, 0.25, 1);
 }
 
 function updateDecolorGauge() {
@@ -272,7 +435,7 @@ function drawResults() {
 
   textSize(16);
   text(
-    `Correctly stained cells: ${slide.correctCount} / ${slide.cells.length}`,
+    `Correctly stained cells: ${slide.correctCount} / ${slide.aliveCount || slide.cells.length}`,
     width / 2,
     130
   );
@@ -299,6 +462,10 @@ function drawButton(x, y, w, h, label) {
   text(label, x + w / 2, y + h / 2);
 }
 
+function drawActionButton(x, y, w, h, label) {
+  drawButton(x, y, w, h, label);
+}
+
 // ---------- MODEL: SLIDE & CELLS ----------
 
 class Slide {
@@ -306,6 +473,9 @@ class Slide {
     this.cells = [];
     this.correctCount = 0;
     this.feedback = "";
+    this.smearCoverage = 1;
+    this.smearOverload = 0;
+    this.heatLevel = 55;
 
     // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
@@ -332,12 +502,14 @@ class Slide {
 
   drawCellsBench(step) {
     for (let c of this.cells) {
+      if (!c.alive) continue;
       c.drawBench(step);
     }
   }
 
   drawCellsMicroscope(cx, cy, r) {
     for (let c of this.cells) {
+      if (!c.alive) continue;
       let px = cx + c.scopeX;
       let py = cy + c.scopeY;
       if (dist(px, py, cx, cy) < r - 8) {
@@ -346,14 +518,35 @@ class Slide {
     }
   }
 
+  setSmearStats(coverage, overload) {
+    this.smearCoverage = coverage;
+    this.smearOverload = overload;
+  }
+
+  setHeatLevel(level) {
+    this.heatLevel = level;
+  }
+
   applyDecolorAndSafranin() {
     // Map gauge to qualitative level 0..1
     let g = decolorGauge / 100;
 
+    const smearQuality = constrain(this.smearCoverage - this.smearOverload * 0.5, 0, 1);
+    const heatQuality = getHeatQuality(this.heatLevel);
+
     // For each cell, decide final color
     this.correctCount = 0;
+    this.aliveCount = 0;
 
     for (let c of this.cells) {
+      const survivalProb = constrain(smearQuality * heatQuality, 0, 1);
+      c.alive = random() < survivalProb;
+      if (!c.alive) {
+        c.finalColor = null;
+        continue;
+      }
+      this.aliveCount++;
+
       // Jitter per cell so it's not perfectly deterministic
       let jitter = random(-0.08, 0.08);
       let effective = constrain(g + jitter, 0, 1);
@@ -402,7 +595,7 @@ class Slide {
       "Each MicroBuddy has a true Gram type.\n\n" +
       "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
       line + "\n\n" +
-      `You correctly stained ${this.correctCount} out of ${this.cells.length} cells on this slide.`;
+      `You correctly stained ${this.correctCount} out of ${this.aliveCount || this.cells.length} visible cells on this slide.`;
   }
 }
 
@@ -415,6 +608,7 @@ class Cell {
     this.trueGram = gram; // "positive" or "negative"
     this.morph = morph; // "coccus" or "rod"
     this.finalColor = null; // set after decolor + safranin
+    this.alive = true;
   }
 
   drawBuddyBody(size, colorHex) {
@@ -498,7 +692,20 @@ class Cell {
 // ---------- INPUT ----------
 
 function mousePressed() {
-  if (gameState === "stain") {
+  if (gameState === "smear") {
+    if (isMouseOverButton(width / 2 - 70, height - 120, 140, 36)) {
+      finalizeSmear();
+      return;
+    }
+  } else if (gameState === "heatFix") {
+    if (isMouseOnSlide()) {
+      isHeating = true;
+    }
+    if (isMouseOverButton(width / 2 - 90, height - 120, 180, 38)) {
+      finalizeHeatFix();
+      return;
+    }
+  } else if (gameState === "stain") {
     // reagent clicks
     for (let r of reagents) {
       if (r.isMouseOver()) {
@@ -532,6 +739,25 @@ function mouseReleased() {
     // move to saf step
     currentStep = 3; // saf
     gameState = "stain";
+  }
+  if (gameState === "heatFix") {
+    isHeating = false;
+  }
+}
+
+function mouseDragged() {
+  if (gameState === "smear" && isMouseOnSlide()) {
+    let sx = width / 2 - (width * 0.56) / 2 + 24;
+    let sy = height / 2 + 50 - (height * 0.2) / 2 + 12;
+    let cw = (width * 0.56 - 48) / GRID_COLS;
+    let ch = (height * 0.2 - 24) / GRID_ROWS;
+
+    let gx = floor((mouseX - sx) / cw);
+    let gy = floor((mouseY - sy) / ch);
+    if (gx >= 0 && gx < GRID_COLS && gy >= 0 && gy < GRID_ROWS) {
+      smearGrid[gy][gx] = min(smearGrid[gy][gx] + 1, 6);
+      computeSmearStats();
+    }
   }
 }
 
