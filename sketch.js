@@ -205,6 +205,7 @@ function draw() {
     drawSlideBench("safranin");
     drawDryStep();
     drawStatusBar();
+    drawDryPrompts();
   } else if (gameState === "stain") {
     drawSlideBench();
     drawReagents();
@@ -335,15 +336,15 @@ function drawStatusBar() {
   } else if (gameState === "crystal") {
     if (cvStage === "flood") msg = "Flood the smear with crystal violet until the outline is solid.";
     else if (cvStage === "soak") msg = "Keep it covered while the soak timer finishes.";
-    else if (cvStage === "rinse") msg = "Hold to rinse; tilt with ◀ ▶ / A-D so water runs off gently.";
+    else if (cvStage === "rinse") msg = "Hold to rinse; tilt ◀ ▶ / A-D — more tilt slows flow and cuts harshness.";
   } else if (gameState === "iodine") {
     if (ioStage === "flood") msg = "Flood with iodine until the outline is solid.";
     else if (ioStage === "soak") msg = "Hold coverage for the quick iodine lock-in.";
-    else if (ioStage === "rinse") msg = "Hold to rinse gently; tilt with ◀ ▶ / A-D to keep flow off the smear.";
+    else if (ioStage === "rinse") msg = "Hold to rinse gently; tilt ◀ ▶ / A-D to slow the rinse and ease harshness.";
   } else if (gameState === "safranin") {
     if (safStage === "flood") msg = "Flood with safranin until the outline is solid.";
     else if (safStage === "soak") msg = "Brief soak to tint the pale spots.";
-    else if (safStage === "rinse") msg = "Hold to rinse; tilt with ◀ ▶ / A-D so Gram– stay pink, not washed out.";
+    else if (safStage === "rinse") msg = "Hold to rinse; tilt ◀ ▶ / A-D — more tilt = slower but gentler wash.";
   } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
@@ -700,7 +701,7 @@ function drawIodineHUD() {
   let line2 = "";
   if (ioStage === "flood") line2 = "Click/drag to flood with iodine.";
   if (ioStage === "soak") line2 = "Hold coverage for a quick lock-in.";
-  if (ioStage === "rinse") line2 = "Hold to rinse; tilt with ◀ ▶ / A-D for gentle flow.";
+  if (ioStage === "rinse") line2 = "Hold to rinse; tilt ◀ ▶ / A-D to soften flow (more tilt = slower, gentler).";
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
 
@@ -722,12 +723,13 @@ function updateIoRinse() {
 
   if (isIoRinsing) {
     const frameScale = deltaTime / 16.67;
-    const tiltSafety = constrain(abs(ioTilt) / 28, 0, 1);
+    const gentleness = constrain(abs(ioTilt) / 30, 0, 1);
 
-    const harshIncrement = (0.4 + (1 - tiltSafety) * 0.95) * frameScale;
+    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
+    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
     ioRinseHarshness += harshIncrement;
 
-    const progressIncrement = (1 + tiltSafety * 0.65) * frameScale;
+    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
     ioRinseProgress = min(ioRinseProgress + progressIncrement, IO_RINSE_PROGRESS_GOAL);
   }
 
@@ -921,8 +923,8 @@ function drawSafraninHUD() {
     line1 = "Hold coverage for a quick tint.";
     line2 = "Pink strength scales with soak + prior fade.";
   } else if (safStage === "rinse") {
-    line1 = "Rinse gently. Tilt so runoff glides off the edge.";
-    line2 = "Hard rinses wash Gram– pale; no rinse leaves muddy red.";
+    line1 = "Rinse gently with tilt to slow the flow.";
+    line2 = "Tilt ◀ ▶ / A-D; more tilt = slower but gentler rinse.";
   }
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
@@ -951,12 +953,13 @@ function updateSafRinse() {
 
   if (isSafRinsing) {
     const frameScale = deltaTime / 16.67;
-    const tiltSafety = constrain(abs(safTilt) / 26, 0, 1);
+    const gentleness = constrain(abs(safTilt) / 28, 0, 1);
 
-    const harshIncrement = (0.3 + (1 - tiltSafety) * 0.9) * frameScale;
+    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
+    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
     safRinseHarshness += harshIncrement;
 
-    const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
+    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
     safRinseProgress = min(safRinseProgress + progressIncrement, SAF_RINSE_PROGRESS_GOAL);
   }
 
@@ -1014,7 +1017,6 @@ function drawDryStep() {
   // overlay blot marks on top of the slide
   drawBlotMarks();
   drawDryHUD();
-  drawDryPrompts();
 }
 
 function drawBlotMarks() {
@@ -1335,7 +1337,7 @@ function drawCrystalHUD() {
   let line2 = "";
   if (cvStage === "flood") line2 = "Click/drag to flood the smear.";
   if (cvStage === "soak") line2 = "Hold coverage until the soak bar fills.";
-  if (cvStage === "rinse") line2 = "Hold to rinse; tilt with ◀ ▶ / A-D to keep flow off the smear.";
+  if (cvStage === "rinse") line2 = "Hold to rinse; tilt ◀ ▶ / A-D to soften flow (more tilt = slower, gentler).";
   text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
 }
 
@@ -1357,13 +1359,13 @@ function updateCvRinse() {
 
   if (isCvRinsing) {
     const frameScale = deltaTime / 16.67;
-    const tiltSafety = constrain(abs(cvTilt) / 32, 0, 1);
+    const gentleness = constrain(abs(cvTilt) / 32, 0, 1);
 
-    // More tilt = gentler rinse, flat slide = harsher blast
-    const harshIncrement = (0.35 + (1 - tiltSafety) * 0.9) * frameScale;
+    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
+    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
     cvRinseHarshness += harshIncrement;
 
-    const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
+    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
     cvRinseProgress = min(cvRinseProgress + progressIncrement, CV_RINSE_PROGRESS_GOAL);
   }
 
@@ -1495,18 +1497,19 @@ function drawResults() {
   text(
     `Your call: ${slide.playerCallLabel || "(none)"}  |  True mix: ${slide.trueMajorityLabel}`,
     width / 2,
-    160
+    170
   );
 
   textSize(15);
   const callVerdict = slide.interpretationCorrect ? "You called the mix correctly." : "Your call missed the true mix.";
-  text(callVerdict, width / 2, 185);
+  text(callVerdict, width / 2, 200);
 
   textSize(14);
   const resultsTextWidth = 600;
   const resultsTextX = (width - resultsTextWidth) / 2;
+  const resultsTextY = 230;
   textAlign(LEFT, TOP);
-  text(slide.feedback, resultsTextX, 170, resultsTextWidth, 230); // keep within canvas width
+  text(slide.feedback, resultsTextX, resultsTextY, resultsTextWidth, 240); // keep within canvas width
   textAlign(CENTER, TOP);
 
   drawButton(width / 2 - 150, height - 100, 120, 42, "Replay View");

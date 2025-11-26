@@ -5,10 +5,10 @@ MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal v
 ## Try it locally
 1. Open `index.html` in a browser (no build step required). The canvas centers under the page heading via CSS.
 2. Prep the slide: paint an even smear with your mouse, then heat-fix it by hovering over the flame until the thermometer sits in the green band.
-3. Crystal violet mini-game: flood to 100% coverage, hold the soak bar until it fills, then tilt the slide (◀▶ / A-D) while rinsing to keep the flow gentle—the ghost outline tilts with you, harshness is capped so a brief flat moment won’t wipe the slide, and the step auto-finishes once the rinse bar fills.
-4. Iodine mini-game: flood/soak quickly, watch the lock-in meter, then rinse with a visible tilt arrow and gentle-rinse warning; the step wraps when the rinse bar fills.
+3. Crystal violet mini-game: flood to 100% coverage, hold the soak bar until it fills, then tilt the slide (◀▶ / A-D) while rinsing—more tilt slows the rinse and keeps the flow gentle. The ghost outline tilts with you and the step auto-finishes once the rinse bar fills.
+4. Iodine mini-game: flood/soak quickly, watch the lock-in meter, then rinse with a visible tilt arrow and gentle-rinse warning. Tilting slows the rinse and lowers harshness; the step wraps when the rinse bar fills.
 5. Decolorizer boss-fight: click the Decolorizer bottle to enter a live fade view. Hold on the slide to flow alcohol; Gram– buddies fade fast, Gram+ fade slowly after a grace period. In easy mode a gauge shows the sweet zone; otherwise rely on the visual fade/runoff clarity. Release to lock in your decolor level.
-6. Safranin mini-game: flood/soak quickly, then rinse while tilting (◀▶ / A-D). Decolorized areas drink in bright pink; over-rinsing makes Gram– faint, and skipping rinse leaves a muddy red sheen.
+6. Safranin mini-game: flood/soak quickly, then rinse while tilting (◀▶ / A-D). More tilt slows the rinse but softens the wash; decolorized areas drink in bright pink, over-rinsing makes Gram– faint, and skipping rinse leaves a muddy red sheen.
 7. Dry & observe: click blot pads to dry the slide (dragging while blotting adds a small smear penalty), then head to the microscope. In the scope view, pick “Mostly Gram+” or “Mostly Gram–” before showing results.
 
 > Looking for the “real game” plan instead of the current prototype? See [`DESIGN.md`](./DESIGN.md) for a step-by-step breakdown of how to turn each protocol step into a skill-based mini-game (smear grid, heat-fix thermometer, live decolor fade, interpretation scoring, and more).
