@@ -46,6 +46,13 @@ const IO_SOAK_GOAL_SEC = 1.6; // shorter soak than crystal violet
 const IO_RINSE_PROGRESS_GOAL = 80;
 const IO_RINSE_HARSH_TARGET = 5;
 
+// Safranin mini-game tuning
+const SAF_GRID_COLS = 16;
+const SAF_GRID_ROWS = 5;
+const SAF_SOAK_GOAL_SEC = 1.2; // brief soak
+const SAF_RINSE_PROGRESS_GOAL = 70;
+const SAF_RINSE_HARSH_TARGET = 5;
+
 // ---------- GLOBAL STATE ----------
 
 // Overall state machine walks through: smear prep -> heat-fix -> staining flow -> microscope -> results
@@ -81,6 +88,17 @@ let ioTilt = -18;
 let isIoPouring = false;
 let isIoRinsing = false;
 
+// Safranin mini-game state
+let safGrid;
+let safCoverage = 0;
+let safSoakTime = 0;
+let safStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
+let safRinseProgress = 0;
+let safRinseHarshness = 0;
+let safTilt = -14;
+let isSafPouring = false;
+let isSafRinsing = false;
+
 // Smear + heat-fix data
 const GRID_COLS = 18;
 const GRID_ROWS = 6;
@@ -112,6 +130,7 @@ function startNewSlide() {
   decolorRunoffHint = 0;
   initCrystalStage();
   initIodineStage();
+  initSafraninStage();
   initSmearGrid();
   heat = 0;
   isHeating = false;
@@ -159,6 +178,10 @@ function draw() {
   } else if (gameState === "iodine") {
     drawSlideBench();
     drawIodineStep();
+    drawStatusBar();
+  } else if (gameState === "safranin") {
+    drawSlideBench();
+    drawSafraninStep();
     drawStatusBar();
   } else if (gameState === "stain") {
     drawSlideBench();
@@ -229,7 +252,9 @@ function drawSlideBench(customStep = null, tiltOverride = null) {
         ? cvTilt * 0.35
         : gameState === "iodine" && ioStage === "rinse"
           ? ioTilt * 0.35
-          : 0; // gentle visual tilt
+          : gameState === "safranin" && safStage === "rinse"
+            ? safTilt * 0.35
+            : 0; // gentle visual tilt
 
   // Slide with optional ghost tilt overlay to show rinse angle
   push();
@@ -293,6 +318,10 @@ function drawStatusBar() {
     if (ioStage === "flood") msg = "Flood with iodine until the outline is solid.";
     else if (ioStage === "soak") msg = "Hold coverage for the quick iodine lock-in.";
     else if (ioStage === "rinse") msg = "Hold to rinse gently; tilt with ◀ ▶ / A-D to keep flow off the smear.";
+  } else if (gameState === "safranin") {
+    if (safStage === "flood") msg = "Flood with safranin until the outline is solid.";
+    else if (safStage === "soak") msg = "Brief soak to tint the pale spots.";
+    else if (safStage === "rinse") msg = "Hold to rinse; tilt with ◀ ▶ / A-D so Gram– stay pink, not washed out.";
   } else if (gameState === "stain") {
     let s = steps[currentStep];
     if (s === "crystal") msg = "Click CRYSTAL VIOLET to flood all MicroBuddyz.";
@@ -723,6 +752,236 @@ function finishIodineStep() {
   gameState = "stain";
 }
 
+// ---------- SAFRANIN MINI-GAME ----------
+
+function initSafraninStage() {
+  safGrid = [];
+  for (let y = 0; y < SAF_GRID_ROWS; y++) {
+    safGrid[y] = [];
+    for (let x = 0; x < SAF_GRID_COLS; x++) safGrid[y][x] = 0;
+  }
+  safCoverage = 0;
+  safSoakTime = 0;
+  safStage = "flood";
+  safRinseProgress = 0;
+  safRinseHarshness = 0;
+  safTilt = -14;
+  isSafPouring = false;
+  isSafRinsing = false;
+}
+
+function drawSafraninStep() {
+  progressSafSoak();
+  drawSafraninOverlay();
+  drawSafraninHUD();
+  drawSafraninPrompts();
+}
+
+function drawSafraninOverlay() {
+  let area = getSlidePaintArea(SAF_GRID_COLS, SAF_GRID_ROWS);
+  noStroke();
+  for (let gy = 0; gy < SAF_GRID_ROWS; gy++) {
+    for (let gx = 0; gx < SAF_GRID_COLS; gx++) {
+      let t = safGrid?.[gy]?.[gx] ?? 0;
+      if (t > 0) {
+        let alpha = constrain(50 + t * 45, 50, 190);
+        fill(255, 99, 155, alpha);
+        rect(area.x + gx * area.cw, area.y + gy * area.ch, area.cw, area.ch, 5);
+      }
+    }
+  }
+
+  noFill();
+  stroke(safCoverage >= 0.95 ? color(COLORS.pink) : color(150, 90, 110));
+  strokeWeight(3);
+  rect(area.x - 4, area.y - 4, area.cw * SAF_GRID_COLS + 8, area.ch * SAF_GRID_ROWS + 8, 10);
+
+  if (safStage === "soak" || safStage === "rinse") {
+    drawSafSoakBar();
+  }
+
+  if (safStage === "rinse") {
+    updateSafRinse();
+    drawSafRinseHUD();
+  }
+}
+
+function drawSafSoakBar() {
+  const barW = 260;
+  const barH = 14;
+  const x = width / 2 - barW / 2;
+  const y = height / 2 + 130;
+  const progress = constrain(safSoakTime / SAF_SOAK_GOAL_SEC, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(x - 2, y - 2, barW + 4, barH + 4, 8);
+
+  fill("#ffc1d7");
+  rect(x, y, barW * progress, barH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(x, y, barW, barH, 8);
+
+  noStroke();
+  fill(40);
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  text("Safranin soak", width / 2, y - 6);
+}
+
+function drawSafRinseHUD() {
+  const progressW = 300;
+  const progressH = 14;
+  const px = width / 2 - progressW / 2;
+  const py = height / 2 + 160;
+  const progress = constrain(safRinseProgress / SAF_RINSE_PROGRESS_GOAL, 0, 1);
+
+  noStroke();
+  fill(0, 0, 0, 40);
+  rect(px - 2, py - 2, progressW + 4, progressH + 4, 8);
+
+  fill("#f7b3c9");
+  rect(px, py, progressW * progress, progressH, 8);
+
+  noFill();
+  stroke(255);
+  strokeWeight(2);
+  rect(px, py, progressW, progressH, 8);
+
+  const arrowY = height / 2 + 40;
+  const arrowX = width / 2;
+  stroke(40, 200);
+  strokeWeight(3);
+  line(arrowX - 60, arrowY, arrowX + 60, arrowY);
+  push();
+  translate(arrowX, arrowY);
+  rotate(safTilt);
+  stroke(40);
+  fill("#ffd2a6");
+  triangle(-18, 0, 18, 0, 0, -18);
+  pop();
+
+  noStroke();
+  fill(40);
+  textAlign(CENTER, TOP);
+  textSize(12);
+  text("Tilt with ◀ ▶ or A/D to keep Gram– pink without blasting them.", width / 2, arrowY + 12);
+
+  textAlign(CENTER, BOTTOM);
+  textSize(13);
+  const harsh = safRinseHarshness.toFixed(1);
+  text(`Rinse harshness: ${harsh}   Progress: ${Math.floor(progress * 100)}%`, width / 2, py - 8);
+}
+
+function drawSafraninHUD() {
+  const coveragePct = floor(safCoverage * 100);
+  fill(0, 0, 0, 40);
+  const boxW = 360;
+  const boxH = 74;
+  const boxX = width / 2 - boxW / 2;
+  const boxY = height / 2 - 170;
+  noStroke();
+  rect(boxX, boxY, boxW, boxH, 12);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(14);
+  let line1 = "Flood the smear with safranin.";
+  let line2 = "Only decolorized spots soak up bright pink.";
+  if (safStage === "soak") {
+    line1 = "Hold coverage for a quick tint.";
+    line2 = "Pink strength scales with soak + prior fade.";
+  } else if (safStage === "rinse") {
+    line1 = "Rinse gently. Tilt so runoff glides off the edge.";
+    line2 = "Hard rinses wash Gram– pale; no rinse leaves muddy red.";
+  }
+  text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
+}
+
+function drawSafraninPrompts() {
+  if (safStage === "flood") {
+    drawActionButton(width / 2 - 120, height - 70, 240, 38, "Click + drag to flood safranin");
+  } else if (safStage === "soak") {
+    if (safSoakTime >= SAF_SOAK_GOAL_SEC) {
+      drawActionButton(width / 2 - 90, height - 120, 180, 38, "Start Safranin Rinse");
+    } else {
+      drawActionButton(width / 2 - 110, height - 70, 220, 38, "Hold coverage while it soaks");
+    }
+  } else if (safStage === "rinse") {
+    if (!isSafRinsing) {
+      drawActionButton(width / 2 - 100, height - 120, 200, 38, "Hold on slide to rinse");
+    }
+    if (safRinseProgress >= SAF_RINSE_PROGRESS_GOAL && !isSafRinsing) {
+      drawActionButton(width / 2 - 90, height - 70, 180, 38, "Finish Safranin Step");
+    }
+  }
+}
+
+function updateSafRinse() {
+  if (safStage !== "rinse") return;
+
+  if (isSafRinsing) {
+    const frameScale = deltaTime / 16.67;
+    const tiltSafety = constrain(abs(safTilt) / 26, 0, 1);
+
+    const harshIncrement = (0.3 + (1 - tiltSafety) * 0.9) * frameScale;
+    safRinseHarshness += harshIncrement;
+
+    const progressIncrement = (1 + tiltSafety * 0.6) * frameScale;
+    safRinseProgress = min(safRinseProgress + progressIncrement, SAF_RINSE_PROGRESS_GOAL);
+  }
+
+  if (safRinseProgress >= SAF_RINSE_PROGRESS_GOAL && !isSafRinsing) {
+    finishSafraninStep();
+  }
+}
+
+function paintSafraninAt(mx, my) {
+  let area = getSlidePaintArea(SAF_GRID_COLS, SAF_GRID_ROWS);
+  if (mx < area.x || mx > area.x + area.cw * SAF_GRID_COLS) return;
+  if (my < area.y || my > area.y + area.ch * SAF_GRID_ROWS) return;
+
+  let gx = floor((mx - area.x) / area.cw);
+  let gy = floor((my - area.y) / area.ch);
+  if (gx >= 0 && gx < SAF_GRID_COLS && gy >= 0 && gy < SAF_GRID_ROWS) {
+    safGrid[gy][gx] = min(safGrid[gy][gx] + 1, 5);
+    computeSafCoverage();
+    if (safCoverage >= 0.95 && safStage === "flood") {
+      safStage = "soak";
+    }
+  }
+}
+
+function computeSafCoverage() {
+  let filled = 0;
+  for (let y = 0; y < SAF_GRID_ROWS; y++) {
+    for (let x = 0; x < SAF_GRID_COLS; x++) {
+      if ((safGrid?.[y]?.[x] ?? 0) > 0) filled++;
+    }
+  }
+  safCoverage = filled / (SAF_GRID_COLS * SAF_GRID_ROWS);
+}
+
+function progressSafSoak() {
+  if (safStage === "soak" && safCoverage >= 0.95) {
+    safSoakTime += deltaTime / 1000;
+    if (safSoakTime > SAF_SOAK_GOAL_SEC * 1.25) {
+      safStage = "rinse";
+    }
+  }
+}
+
+function finishSafraninStep() {
+  slide.setSafraninStats(safCoverage, safSoakTime, safRinseHarshness, safRinseProgress);
+  slide.applyFinalSafranin();
+  safStage = "done";
+  currentStep++;
+  gameState = "microscope";
+}
+
 // ---------- DECOLORIZER MINI-GAME ----------
 
   function startDecolorStage() {
@@ -1144,6 +1403,10 @@ class Slide {
     this.ioSoakTime = 0;
     this.ioRinseHarshness = 0;
     this.ioRinseProgress = 0;
+    this.safCoverage = 0;
+    this.safSoakTime = 0;
+    this.safRinseHarshness = 0;
+    this.safRinseProgress = 0;
 
     // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
@@ -1169,7 +1432,7 @@ class Slide {
   }
 
   drawCellsBench(step, tiltAngle = 0) {
-    const tiltActive = tiltAngle !== 0 && (gameState === "crystal" || gameState === "iodine");
+    const tiltActive = tiltAngle !== 0 && (gameState === "crystal" || gameState === "iodine" || gameState === "safranin");
     if (tiltActive) {
       const cx = width / 2;
       const cy = height / 2 + 50;
@@ -1226,6 +1489,13 @@ class Slide {
     this.ioRinseProgress = rinseProgress;
   }
 
+  setSafraninStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+    this.safCoverage = coverage;
+    this.safSoakTime = soakSeconds;
+    this.safRinseHarshness = rinseHarshness;
+    this.safRinseProgress = rinseProgress;
+  }
+
   resetDecolorLevels() {
     this.meanDecolorLevel = 0;
     this.meanDecolorLevelNorm = 0;
@@ -1275,8 +1545,7 @@ class Slide {
     return count ? total / count : 0;
   }
 
-  applyDecolorAndSafranin() {
-    // Map per-cell decolor exposure to qualitative level 0..1
+  applyFinalSafranin() {
     const globalExposure = this.meanDecolorLevelNorm ?? 0;
 
     const smearQuality = constrain(this.smearCoverage - this.smearOverload * 0.5, 0, 1);
@@ -1286,19 +1555,23 @@ class Slide {
     const iodineLock = this.getIodineLockQuality();
     const iodineRinsePenalty = constrain(this.ioRinseHarshness / IO_RINSE_HARSH_TARGET, 0, 1);
 
-    // For each cell, decide final color
+    const safCoverageQuality = constrain(this.safCoverage, 0, 1);
+    const safSoakQuality = constrain(this.safSoakTime / SAF_SOAK_GOAL_SEC, 0, 1.2);
+    const safRinsePenalty = constrain(this.safRinseHarshness / (SAF_RINSE_HARSH_TARGET * 2), 0, 1);
+    const safRinseCompleteness = constrain(this.safRinseProgress / SAF_RINSE_PROGRESS_GOAL, 0, 1);
+    const muddyBias = safRinseCompleteness < 0.35 ? map(safRinseCompleteness, 0, 0.35, 0.25, 0) : 0;
+
     this.correctCount = 0;
     this.aliveCount = 0;
 
-    // Normalize rinse harshness so an overzealous rinse hurts but doesn't wipe the entire slide.
-    // Values above ~2x the harsh target will max the penalty.
     const harshPenalty = constrain(this.cvRinseHarshness / (CV_RINSE_HARSH_TARGET * 2), 0, 1);
 
     for (let c of this.cells) {
-      // Start with a healthy baseline so a perfect smear/heat/flood keeps most buddies alive.
       const prepQuality = smearQuality * heatQuality * cvBinding * (0.75 + 0.25 * iodineLock);
       const survivalProb = constrain(
-        0.2 + prepQuality * (1 - 0.6 * harshPenalty) * (1 - 0.35 * iodineRinsePenalty),
+        0.2 +
+          prepQuality * (1 - 0.6 * harshPenalty) * (1 - 0.35 * iodineRinsePenalty) *
+          (0.9 - 0.25 * safRinsePenalty),
         0,
         1
       );
@@ -1310,7 +1583,6 @@ class Slide {
       }
       this.aliveCount++;
 
-      // Jitter per cell so it's not perfectly deterministic
       let jitter = random(-0.08, 0.08);
       const cellExposure = c.decolorLevel ? constrain(c.decolorLevel / DECOLOR_PREVIEW_CAP, 0, 1) : globalExposure;
       let effective = constrain(
@@ -1319,26 +1591,23 @@ class Slide {
         1
       );
 
+      let pinkStrength;
       if (c.trueGram === "positive") {
-        // Gram+: stay purple unless very strong decolorization
-        if (effective < 0.7) {
-          c.finalColor = COLORS.purple;
-        } else {
-          // over-decolorized, picks up safranin
-          c.finalColor = COLORS.pink;
-        }
+        pinkStrength = constrain(map(effective, 0.7, 1, 0, 1), 0, 1);
       } else {
-        // Gram–: need decent decolorization to lose purple
-        if (effective < 0.4) {
-          c.finalColor = COLORS.purple; // under-decolorized
-        } else {
-          c.finalColor = COLORS.pink;
-        }
+        pinkStrength = constrain(map(effective, 0.35, 0.9, 0, 1), 0, 1);
       }
 
-      // scoring
-      let expected = c.trueGram === "positive" ? COLORS.purple : COLORS.pink;
-      if (c.finalColor === expected) {
+      const soakBoost = constrain(0.4 + 0.6 * safSoakQuality, 0, 1.15);
+      const rinseRetention = constrain(0.9 - 0.5 * safRinsePenalty + safRinseCompleteness * 0.25, 0, 1.05);
+      pinkStrength = constrain(pinkStrength * safCoverageQuality * soakBoost * rinseRetention + muddyBias, 0, 1);
+
+      const finalCol = lerpColor(color(COLORS.purple), color(COLORS.pink), pinkStrength);
+      c.finalColor = finalCol;
+
+      const observedTone = pinkStrength >= 0.5 ? "pink" : "purple";
+      const expectedTone = c.trueGram === "positive" ? "purple" : "pink";
+      if (observedTone === expectedTone) {
         this.correctCount++;
       }
     }
@@ -1346,10 +1615,10 @@ class Slide {
     totalScore += this.correctCount;
     totalSlides++;
 
-    this.buildFeedback(globalExposure);
+    this.buildFeedback(globalExposure, safSoakQuality, safRinsePenalty, safRinseCompleteness);
   }
 
-  buildFeedback(g) {
+  buildFeedback(g, safSoakQuality, safRinsePenalty, safRinseCompleteness) {
     let line;
     if (g < GAUGE_MIN / 100) {
       line = "You under-decolorized overall, so many Gram– buddies stayed falsely purple.";
@@ -1359,11 +1628,19 @@ class Slide {
       line = "Nice timing! Most Gram+ buddies stayed purple and most Gram– buddies picked up pink.";
     }
 
+    const safLine = safRinseCompleteness < 0.35
+      ? "You barely rinsed safranin, so everything looks muddier red."
+      : safRinsePenalty > 0.7
+        ? "Rinse was strong, so some Gram– are faint pink."
+        : safSoakQuality < 0.75
+          ? "Short safranin soak left Gram– a bit pale."
+          : "Safranin soak and rinse kept Gram– nicely pink.";
+
     this.feedback =
       "Each MicroBuddy has a true Gram type.\n\n" +
       "Purple bodies = Gram positive, Pink bodies = Gram negative.\n\n" +
-      line + "\n\n" +
-      this.getCrystalNote() + this.getIodineNote() +
+      line + "\n" + safLine + "\n\n" +
+      this.getCrystalNote() + this.getIodineNote() + this.getSafraninNote(safSoakQuality, safRinsePenalty) +
       `You correctly stained ${this.correctCount} out of ${this.aliveCount || this.cells.length} visible cells on this slide.`;
   }
 
@@ -1400,6 +1677,16 @@ class Slide {
     const rinseText = this.ioRinseHarshness > IO_RINSE_HARSH_TARGET
       ? "Iodine rinse was rough and loosened some stain."
       : "Iodine rinse stayed gentle, keeping Gram+ stain locked in.";
+    return `${soakText} ${rinseText}\n\n`;
+  }
+
+  getSafraninNote(soakQuality, rinsePenalty) {
+    const soakText = soakQuality >= 1
+      ? "Safranin soak covered the pale areas well."
+      : "Safranin soak was brief, so pink uptake may be light.";
+    const rinseText = rinsePenalty > 0.7
+      ? "Rinse was strong and may have washed Gram– too pale."
+      : "Rinse stayed gentle so Gram– held onto pink.";
     return `${soakText} ${rinseText}\n\n`;
   }
 }
@@ -1570,6 +1857,25 @@ function mousePressed() {
         isIoRinsing = true;
       }
     }
+  } else if (gameState === "safranin") {
+    if (safStage === "soak" && safSoakTime >= SAF_SOAK_GOAL_SEC &&
+        isMouseOverButton(width / 2 - 90, height - 120, 180, 38)) {
+      safStage = "rinse";
+      return;
+    }
+    if (safStage === "rinse" && safRinseProgress >= SAF_RINSE_PROGRESS_GOAL &&
+        isMouseOverButton(width / 2 - 90, height - 70, 180, 38)) {
+      finishSafraninStep();
+      return;
+    }
+    if (isMouseOnSlide()) {
+      if (safStage === "flood" || safStage === "soak") {
+        isSafPouring = true;
+        paintSafraninAt(mouseX, mouseY);
+      } else if (safStage === "rinse") {
+        isSafRinsing = true;
+      }
+    }
   } else if (gameState === "stain") {
     // reagent clicks
     for (let r of reagents) {
@@ -1599,9 +1905,7 @@ function mousePressed() {
 function mouseReleased() {
   if (gameState === "decolor" && isDecolorFlowing) {
     isDecolorFlowing = false;
-    // finalize cell colors based on live per-cell decolor levels
-    slide.applyDecolorAndSafranin();
-    // move to saf step
+    // move to saf step, preserving per-cell decolor levels for the safranin mini-game
     currentStep = 3; // saf
     gameState = "stain";
   }
@@ -1615,6 +1919,10 @@ function mouseReleased() {
   if (gameState === "iodine") {
     isIoPouring = false;
     isIoRinsing = false;
+  }
+  if (gameState === "safranin") {
+    isSafPouring = false;
+    isSafRinsing = false;
   }
 }
 
@@ -1632,6 +1940,8 @@ function mouseDragged() {
     paintCrystalAt(mouseX, mouseY);
   } else if (gameState === "iodine" && isMouseOnSlide() && (ioStage === "flood" || ioStage === "soak") && isIoPouring) {
     paintIodineAt(mouseX, mouseY);
+  } else if (gameState === "safranin" && isMouseOnSlide() && (safStage === "flood" || safStage === "soak") && isSafPouring) {
+    paintSafraninAt(mouseX, mouseY);
   }
 }
 
@@ -1646,8 +1956,8 @@ function handleReagentClick(id) {
   } else if (id === "decolor") {
     startDecolorStage();
   } else if (id === "safranin") {
-    // after saf, go to microscope
-    gameState = "microscope";
+    initSafraninStage();
+    gameState = "safranin";
   }
 }
 
@@ -1683,6 +1993,13 @@ function keyPressed() {
     }
     if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') {
       ioTilt = min(30, ioTilt + 3);
+    }
+  } else if (gameState === "safranin" && safStage === "rinse") {
+    if (keyCode === LEFT_ARROW || key === 'a' || key === 'A') {
+      safTilt = max(-28, safTilt - 3);
+    }
+    if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') {
+      safTilt = min(28, safTilt + 3);
     }
   }
 }

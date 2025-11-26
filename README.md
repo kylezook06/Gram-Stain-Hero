@@ -8,15 +8,15 @@ MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal v
 3. Crystal violet mini-game: flood to 100% coverage, hold the soak bar until it fills, then tilt the slide (◀▶ / A-D) while rinsing to keep the flow gentle—the ghost outline tilts with you, harshness is capped so a brief flat moment won’t wipe the slide, and the step auto-finishes once the rinse bar fills.
 4. Iodine mini-game: flood/soak quickly, watch the lock-in meter, then rinse with a visible tilt arrow and gentle-rinse warning; the step wraps when the rinse bar fills.
 5. Decolorizer boss-fight: click the Decolorizer bottle to enter a live fade view. Hold on the slide to flow alcohol; Gram– buddies fade fast, Gram+ fade slowly after a grace period. In easy mode a gauge shows the sweet zone; otherwise rely on the visual fade/runoff clarity. Release to lock in your decolor level.
-6. Finish with safranin, jump to the microscope, and check your per-cell score.
+6. Safranin mini-game: flood/soak quickly, then rinse while tilting (◀▶ / A-D). Decolorized areas drink in bright pink; over-rinsing makes Gram– faint, and skipping rinse leaves a muddy red sheen. When the rinse bar finishes and you release, you’ll jump to the microscope.
 
 > Looking for the “real game” plan instead of the current prototype? See [`DESIGN.md`](./DESIGN.md) for a step-by-step breakdown of how to turn each protocol step into a skill-based mini-game (smear grid, heat-fix thermometer, live decolor fade, interpretation scoring, and more).
 
 ## What's included
 - **Plushy MicroBuddy cells:** mixed cocci and rods every slide, safety eyes, soft highlights, and scope-ready shading.
 - **Bottle buddies UI:** clickable reagent bottles with hover/active states, gating, and completion checkmarks.
-- **Smear + heat-fix + crystal violet + iodine mini-games:** draw an even smear, heat it without burning, then flood/soak/tilt-rinse crystal violet and iodine to decide how well cells stick before decolorizer.
-- **Decolorizer boss fight:** live MicroBuddy fade while alcohol flows; Gram– wash out fast, Gram+ resist. Easy mode shows a sweet-zone gauge; hard mode leans on runoff clarity and visual fade. Per-cell `decolorLevel` feeds final Gram reaction and scoring.
+- **Smear + heat-fix + crystal violet + iodine + safranin mini-games:** draw an even smear, heat it without burning, flood/soak/tilt-rinse crystal violet and iodine, then flood/soak/tilt-rinse safranin so only decolorized buddies pick up bright pink.
+- **Decolorizer boss fight:** live MicroBuddy fade while alcohol flows; Gram– wash out fast, Gram+ resist. Easy mode shows a sweet-zone gauge; hard mode leans on runoff clarity and visual fade. Per-cell `decolorLevel` feeds final Gram reaction, safranin pickup, and scoring.
 - **Per-cell scoring loop:** each slide contains a mix of Gram+ and Gram– cells; your smear, heat, and decolorizer timing flip colors per-cell and add to your total score.
 - **Lab & scope layout:** centered canvas, warm bench palette, decolorizer gauge mini-game, microscope view, and results screen text constrained to the page.
 
