@@ -76,6 +76,7 @@ let cvRinseHarshness = 0;
 let cvTilt = -24; // degrees, negative tilts left for runoff
 let isCvPouring = false;
 let isCvRinsing = false;
+let cvRinseTag = { label: "", color: "#ffffff", tiltNorm: 0 };
 
 // Iodine mini-game state
 let ioGrid;
@@ -87,6 +88,7 @@ let ioRinseHarshness = 0;
 let ioTilt = -18;
 let isIoPouring = false;
 let isIoRinsing = false;
+let ioRinseTag = { label: "", color: "#ffffff", tiltNorm: 0 };
 
 // Safranin mini-game state
 let safGrid;
@@ -98,6 +100,7 @@ let safRinseHarshness = 0;
 let safTilt = -14;
 let isSafPouring = false;
 let isSafRinsing = false;
+let safRinseTag = { label: "", color: "#ffffff", tiltNorm: 0 };
 
 // Dry & observe mini-game state
 let blotMarks = [];
@@ -548,6 +551,7 @@ function initCrystalStage() {
   cvTilt = -24;
   isCvPouring = false;
   isCvRinsing = false;
+  cvRinseTag = computeRinseDynamics(cvTilt, 32);
 }
 
 // ---------- IODINE MINI-GAME ----------
@@ -566,6 +570,7 @@ function initIodineStage() {
   ioTilt = -18;
   isIoPouring = false;
   isIoRinsing = false;
+  ioRinseTag = computeRinseDynamics(ioTilt, 30);
 }
 
 function drawIodineStep() {
@@ -672,6 +677,12 @@ function drawIoRinseHUD() {
     py - 8
   );
 
+  if (ioStage === "rinse") {
+    textAlign(CENTER, TOP);
+    fill(ioRinseTag.color);
+    text(ioRinseTag.label + " (more tilt = slower/gentler)", width / 2, py + 20);
+  }
+
   // gentle rinse warning
   if (ioRinseHarshness > IO_RINSE_HARSH_TARGET * 0.9) {
     fill(200, 80, 40);
@@ -723,14 +734,11 @@ function updateIoRinse() {
 
   if (isIoRinsing) {
     const frameScale = deltaTime / 16.67;
-    const gentleness = constrain(abs(ioTilt) / 30, 0, 1);
+    const dynamics = computeRinseDynamics(ioTilt, 30);
+    ioRinseTag = dynamics;
 
-    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
-    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
-    ioRinseHarshness += harshIncrement;
-
-    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
-    ioRinseProgress = min(ioRinseProgress + progressIncrement, IO_RINSE_PROGRESS_GOAL);
+    ioRinseHarshness += dynamics.harshRate * frameScale;
+    ioRinseProgress = min(ioRinseProgress + dynamics.flowRate * frameScale, IO_RINSE_PROGRESS_GOAL);
   }
 
   if (ioRinseProgress >= IO_RINSE_PROGRESS_GOAL && !isIoRinsing) {
@@ -796,6 +804,7 @@ function initSafraninStage() {
   safTilt = -14;
   isSafPouring = false;
   isSafRinsing = false;
+  safRinseTag = computeRinseDynamics(safTilt, 28);
 }
 
 function drawSafraninStep() {
@@ -902,6 +911,12 @@ function drawSafRinseHUD() {
   textSize(13);
   const harsh = safRinseHarshness.toFixed(1);
   text(`Rinse harshness: ${harsh}   Progress: ${Math.floor(progress * 100)}%`, width / 2, py - 8);
+
+  if (safStage === "rinse") {
+    textAlign(CENTER, TOP);
+    fill(safRinseTag.color);
+    text(safRinseTag.label + " (more tilt = slower/gentler)", width / 2, py + 20);
+  }
 }
 
 function drawSafraninHUD() {
@@ -953,14 +968,11 @@ function updateSafRinse() {
 
   if (isSafRinsing) {
     const frameScale = deltaTime / 16.67;
-    const gentleness = constrain(abs(safTilt) / 28, 0, 1);
+    const dynamics = computeRinseDynamics(safTilt, 28);
+    safRinseTag = dynamics;
 
-    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
-    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
-    safRinseHarshness += harshIncrement;
-
-    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
-    safRinseProgress = min(safRinseProgress + progressIncrement, SAF_RINSE_PROGRESS_GOAL);
+    safRinseHarshness += dynamics.harshRate * frameScale;
+    safRinseProgress = min(safRinseProgress + dynamics.flowRate * frameScale, SAF_RINSE_PROGRESS_GOAL);
   }
 
   if (safRinseProgress >= SAF_RINSE_PROGRESS_GOAL && !isSafRinsing) {
@@ -1109,9 +1121,9 @@ function drawDecolorStep() {
 function drawDecolorHUD() {
   // Status box
   const boxW = 420;
-  const boxH = 90;
+  const boxH = 110;
   const boxX = width / 2 - boxW / 2;
-  const boxY = height / 2 + 120;
+  const boxY = height / 2 + 90;
   fill(0, 0, 0, 45);
   noStroke();
   rect(boxX, boxY, boxW, boxH, 12);
@@ -1119,12 +1131,16 @@ function drawDecolorHUD() {
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(14);
+  textLeading(18);
   let line1 = "Hold on the slide to flow alcohol.";
   let line2 = "Release when Gram– look pale and runoff clears.";
+  let line3 = "Runoff bar stays near green when the stream clears.";
   if (DECOLOR_SHOW_GAUGE) {
     line2 = "Watch the fade or use the gauge; release near the sweet zone.";
+    line3 = "Gauge = average fade. Green band = good timing.";
   }
-  text(line1 + "\n" + line2, width / 2, boxY + boxH / 2);
+  text(line1 + "\n" + line2 + "\n" + line3, width / 2, boxY + boxH / 2);
+  textLeading(16);
 
   if (DECOLOR_SHOW_GAUGE) {
     drawDecolorGaugeEasy();
@@ -1188,6 +1204,27 @@ function drawDecolorGaugeEasy() {
   textAlign(CENTER, BOTTOM);
   textSize(12);
   text("Decolorizer Flow (avg)", width / 2, y - 5);
+}
+
+// Shared helper to make tilt clearly affect rinse speed/harshness
+function computeRinseDynamics(tilt, maxTilt) {
+  const tiltNorm = constrain(abs(tilt) / maxTilt, 0, 1);
+
+  // High tilt = slower flow and softer harshness; flat = faster, harsher
+  const flowRate = lerp(1.65, 0.45, tiltNorm); // progress increment scale
+  const harshRate = lerp(1.35, 0.18, tiltNorm); // harshness increment scale
+
+  let label = "Flat = fast/harsh";
+  let color = "#d54b4b";
+  if (tiltNorm > 0.25 && tiltNorm < 0.65) {
+    label = "Moderate tilt";
+    color = "#e6a93f";
+  } else if (tiltNorm >= 0.65) {
+    label = "High tilt = slow/gentle";
+    color = "#2fa169";
+  }
+
+  return { flowRate, harshRate, label, color, tiltNorm };
 }
 
 function drawDecolorPrompts() {
@@ -1318,6 +1355,12 @@ function drawCvRinseHUD() {
   textSize(13);
   const harsh = cvRinseHarshness.toFixed(1);
   text(`Rinse harshness: ${harsh}   Progress: ${Math.floor(progress * 100)}%`, width / 2, py - 8);
+
+  if (cvStage === "rinse") {
+    textAlign(CENTER, TOP);
+    fill(cvRinseTag.color);
+    text(cvRinseTag.label + " (more tilt = slower/gentler)", width / 2, py + 22);
+  }
 }
 
 function drawCrystalHUD() {
@@ -1359,14 +1402,11 @@ function updateCvRinse() {
 
   if (isCvRinsing) {
     const frameScale = deltaTime / 16.67;
-    const gentleness = constrain(abs(cvTilt) / 32, 0, 1);
+    const dynamics = computeRinseDynamics(cvTilt, 32);
+    cvRinseTag = dynamics;
 
-    // Flat = fast but harsh. More tilt = slower progress and gentler rinse.
-    const harshIncrement = (0.25 + (1 - gentleness) * 0.9) * frameScale;
-    cvRinseHarshness += harshIncrement;
-
-    const progressIncrement = (0.5 + (1 - gentleness) * 1.0) * frameScale;
-    cvRinseProgress = min(cvRinseProgress + progressIncrement, CV_RINSE_PROGRESS_GOAL);
+    cvRinseHarshness += dynamics.harshRate * frameScale;
+    cvRinseProgress = min(cvRinseProgress + dynamics.flowRate * frameScale, CV_RINSE_PROGRESS_GOAL);
   }
 
   if (cvRinseProgress >= CV_RINSE_PROGRESS_GOAL && !isCvRinsing) {
