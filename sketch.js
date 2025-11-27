@@ -44,21 +44,21 @@ const CV_GRID_COLS = 16;
 const CV_GRID_ROWS = 5;
 const CV_SOAK_GOAL_SEC = 3; // seconds you should hold once fully flooded
 const CV_RINSE_PROGRESS_GOAL = 100; // arbitrary progress units before rinse is considered complete
-const CV_RINSE_HARSH_TARGET = 6; // higher values = harsher rinse penalty threshold
+const CV_RINSE_HARSH_TARGET = 9; // higher values = harsher rinse penalty threshold
 
 // Iodine mini-game tuning
 const IO_GRID_COLS = 16;
 const IO_GRID_ROWS = 5;
 const IO_SOAK_GOAL_SEC = 1.6; // shorter soak than crystal violet
 const IO_RINSE_PROGRESS_GOAL = 80;
-const IO_RINSE_HARSH_TARGET = 5;
+const IO_RINSE_HARSH_TARGET = 8;
 
 // Safranin mini-game tuning
 const SAF_GRID_COLS = 16;
 const SAF_GRID_ROWS = 5;
 const SAF_SOAK_GOAL_SEC = 1.2; // brief soak
 const SAF_RINSE_PROGRESS_GOAL = 70;
-const SAF_RINSE_HARSH_TARGET = 5;
+const SAF_RINSE_HARSH_TARGET = 8;
 
 // ---------- GLOBAL STATE ----------
 
@@ -80,6 +80,8 @@ let cvSoakTime = 0;
 let cvStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
 let cvRinseProgress = 0;
 let cvRinseHarshness = 0;
+let cvTiltSamples = 0;
+let cvTiltSum = 0;
 let cvTilt = -24; // degrees, negative tilts left for runoff
 let isCvPouring = false;
 let isCvRinsing = false;
@@ -92,6 +94,8 @@ let ioSoakTime = 0;
 let ioStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
 let ioRinseProgress = 0;
 let ioRinseHarshness = 0;
+let ioTiltSamples = 0;
+let ioTiltSum = 0;
 let ioTilt = -18;
 let isIoPouring = false;
 let isIoRinsing = false;
@@ -104,6 +108,8 @@ let safSoakTime = 0;
 let safStage = "flood"; // "flood" -> "soak" -> "rinse" -> "done"
 let safRinseProgress = 0;
 let safRinseHarshness = 0;
+let safTiltSamples = 0;
+let safTiltSum = 0;
 let safTilt = -14;
 let isSafPouring = false;
 let isSafRinsing = false;
@@ -117,6 +123,7 @@ let isBlotting = false;
 let lastBlotX = 0;
 let lastBlotY = 0;
 let playerInterpretation = null; // "positive" | "negative"
+let reagentHighlightEnabled = true;
 
 // Smear + heat-fix data
 const GRID_COLS = 18;
@@ -149,6 +156,7 @@ function startNewSlide() {
   decolorGauge = 0;
   isDecolorFlowing = false;
   decolorRunoffHint = 0;
+  reagentHighlightEnabled = totalSlides === 0;
   initCrystalStage();
   initIodineStage();
   initSafraninStage();
@@ -341,7 +349,7 @@ function drawReagents() {
     let r = reagents[i];
     let isCurrent = steps[currentStep] === r.id;
     let isDone = i < currentStep;
-    r.draw(isCurrent, isDone);
+    r.draw(isCurrent, isDone, reagentHighlightEnabled);
   }
 }
 
@@ -571,6 +579,8 @@ function initCrystalStage() {
   cvStage = "flood";
   cvRinseProgress = 0;
   cvRinseHarshness = 0;
+  cvTiltSamples = 0;
+  cvTiltSum = 0;
   cvTilt = -24;
   isCvPouring = false;
   isCvRinsing = false;
@@ -590,6 +600,8 @@ function initIodineStage() {
   ioStage = "flood";
   ioRinseProgress = 0;
   ioRinseHarshness = 0;
+  ioTiltSamples = 0;
+  ioTiltSum = 0;
   ioTilt = -18;
   isIoPouring = false;
   isIoRinsing = false;
@@ -761,6 +773,8 @@ function updateIoRinse() {
     const dynamics = computeRinseDynamics(ioTilt, POINTER_TILT_MAX.iodine);
     ioRinseTag = dynamics;
 
+    ioTiltSum += dynamics.tiltNorm;
+    ioTiltSamples++;
     ioRinseHarshness += dynamics.harshRate * frameScale;
     ioRinseProgress = min(ioRinseProgress + dynamics.flowRate * frameScale, IO_RINSE_PROGRESS_GOAL);
   }
@@ -806,7 +820,10 @@ function progressIoSoak() {
 }
 
 function finishIodineStep() {
-  slide.setIodineStats(ioCoverage, ioSoakTime, ioRinseHarshness, ioRinseProgress);
+  const tiltAvg = ioTiltSamples ? ioTiltSum / ioTiltSamples : 0;
+  const tiltRelief = 1 - tiltAvg * 0.45;
+  const effectiveHarsh = ioRinseHarshness * tiltRelief;
+  slide.setIodineStats(ioCoverage, ioSoakTime, effectiveHarsh, ioRinseProgress, tiltAvg);
   ioStage = "done";
   currentStep++;
   gameState = "stain";
@@ -825,6 +842,8 @@ function initSafraninStage() {
   safStage = "flood";
   safRinseProgress = 0;
   safRinseHarshness = 0;
+  safTiltSamples = 0;
+  safTiltSum = 0;
   safTilt = -14;
   isSafPouring = false;
   isSafRinsing = false;
@@ -996,6 +1015,8 @@ function updateSafRinse() {
     const dynamics = computeRinseDynamics(safTilt, POINTER_TILT_MAX.safranin);
     safRinseTag = dynamics;
 
+    safTiltSum += dynamics.tiltNorm;
+    safTiltSamples++;
     safRinseHarshness += dynamics.harshRate * frameScale;
     safRinseProgress = min(safRinseProgress + dynamics.flowRate * frameScale, SAF_RINSE_PROGRESS_GOAL);
   }
@@ -1041,7 +1062,10 @@ function progressSafSoak() {
 }
 
 function finishSafraninStep() {
-  slide.setSafraninStats(safCoverage, safSoakTime, safRinseHarshness, safRinseProgress);
+  const tiltAvg = safTiltSamples ? safTiltSum / safTiltSamples : 0;
+  const tiltRelief = 1 - tiltAvg * 0.45;
+  const effectiveHarsh = safRinseHarshness * tiltRelief;
+  slide.setSafraninStats(safCoverage, safSoakTime, effectiveHarsh, safRinseProgress, tiltAvg);
   slide.applyFinalSafranin();
   safStage = "done";
   currentStep++;
@@ -1242,8 +1266,8 @@ function computeRinseDynamics(tilt, maxTilt) {
   const tiltNorm = constrain(abs(tilt) / maxTilt, 0, 1);
 
   // High tilt = slower flow and softer harshness; flat = faster, harsher
-  const flowRate = lerp(1.65, 0.45, tiltNorm); // progress increment scale
-  const harshRate = lerp(1.35, 0.18, tiltNorm); // harshness increment scale
+  const flowRate = lerp(1.35, 0.55, tiltNorm); // progress increment scale
+  const harshRate = lerp(0.05, 0.01, tiltNorm); // harshness increment scale
 
   let label = "Flat = fast/harsh";
   let color = "#d54b4b";
@@ -1452,6 +1476,8 @@ function updateCvRinse() {
     const dynamics = computeRinseDynamics(cvTilt, POINTER_TILT_MAX.crystal);
     cvRinseTag = dynamics;
 
+    cvTiltSum += dynamics.tiltNorm;
+    cvTiltSamples++;
     cvRinseHarshness += dynamics.harshRate * frameScale;
     cvRinseProgress = min(cvRinseProgress + dynamics.flowRate * frameScale, CV_RINSE_PROGRESS_GOAL);
   }
@@ -1497,7 +1523,10 @@ function progressCvSoak() {
 }
 
 function finishCrystalStep() {
-  slide.setCrystalStats(cvCoverage, cvSoakTime, cvRinseHarshness, cvRinseProgress);
+  const tiltAvg = cvTiltSamples ? cvTiltSum / cvTiltSamples : 0;
+  const tiltRelief = 1 - tiltAvg * 0.5;
+  const effectiveHarsh = cvRinseHarshness * tiltRelief;
+  slide.setCrystalStats(cvCoverage, cvSoakTime, effectiveHarsh, cvRinseProgress, tiltAvg);
   cvStage = "done";
   currentStep++;
   gameState = "stain";
@@ -1637,6 +1666,7 @@ class Slide {
     this.observedPositiveCount = 0;
     this.observedNegativeCount = 0;
     this.observedMajorityLabel = "";
+    this.lastFeedbackParams = null;
     this.smearCoverage = 1;
     this.smearOverload = 0;
     this.heatLevel = 55;
@@ -1644,14 +1674,17 @@ class Slide {
     this.cvSoakTime = 0;
     this.cvRinseHarshness = 0;
     this.cvRinseProgress = 0;
+    this.cvTiltAvg = 0;
     this.ioCoverage = 0;
     this.ioSoakTime = 0;
     this.ioRinseHarshness = 0;
     this.ioRinseProgress = 0;
+    this.ioTiltAvg = 0;
     this.safCoverage = 0;
     this.safSoakTime = 0;
     this.safRinseHarshness = 0;
     this.safRinseProgress = 0;
+    this.safTiltAvg = 0;
 
     // bench positions
     let slideX1 = width / 2 - (width * 0.56) / 2 + 40;
@@ -1730,31 +1763,38 @@ class Slide {
     this.heatLevel = level;
   }
 
-  setCrystalStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+  setCrystalStats(coverage, soakSeconds, rinseHarshness, rinseProgress, tiltAvg = 0) {
     this.cvCoverage = coverage;
     this.cvSoakTime = soakSeconds;
     this.cvRinseHarshness = rinseHarshness;
     this.cvRinseProgress = rinseProgress;
+    this.cvTiltAvg = tiltAvg;
   }
 
-  setIodineStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+  setIodineStats(coverage, soakSeconds, rinseHarshness, rinseProgress, tiltAvg = 0) {
     this.ioCoverage = coverage;
     this.ioSoakTime = soakSeconds;
     this.ioRinseHarshness = rinseHarshness;
     this.ioRinseProgress = rinseProgress;
+    this.ioTiltAvg = tiltAvg;
   }
 
-  setSafraninStats(coverage, soakSeconds, rinseHarshness, rinseProgress) {
+  setSafraninStats(coverage, soakSeconds, rinseHarshness, rinseProgress, tiltAvg = 0) {
     this.safCoverage = coverage;
     this.safSoakTime = soakSeconds;
     this.safRinseHarshness = rinseHarshness;
     this.safRinseProgress = rinseProgress;
+    this.safTiltAvg = tiltAvg;
   }
 
   setDryStats(dryness, smearDrag, blotCount) {
     this.dryness = dryness;
     this.smearDrag = smearDrag;
     this.blotCount = blotCount;
+    if (this.lastFeedbackParams) {
+      const p = this.lastFeedbackParams;
+      this.buildFeedback(p.globalExposure, p.safSoakQuality, p.safRinsePenalty, p.safRinseCompleteness);
+    }
   }
 
   resetDecolorLevels() {
@@ -1814,11 +1854,13 @@ class Slide {
     const cvBinding = this.getCrystalBindingQuality();
     const rinseAdequacy = constrain(this.cvRinseProgress / CV_RINSE_PROGRESS_GOAL, 0, 1);
     const iodineLock = this.getIodineLockQuality();
-    const iodineRinsePenalty = constrain(this.ioRinseHarshness / IO_RINSE_HARSH_TARGET, 0, 1);
+    const iodineTiltRelief = 1 - (this.ioTiltAvg || 0) * 0.45;
+    const iodineRinsePenalty = constrain((this.ioRinseHarshness * iodineTiltRelief) / (IO_RINSE_HARSH_TARGET * 3), 0, 1);
 
     const safCoverageQuality = constrain(this.safCoverage, 0, 1);
     const safSoakQuality = constrain(this.safSoakTime / SAF_SOAK_GOAL_SEC, 0, 1.2);
-    const safRinsePenalty = constrain(this.safRinseHarshness / (SAF_RINSE_HARSH_TARGET * 2), 0, 1);
+    const safTiltRelief = 1 - (this.safTiltAvg || 0) * 0.45;
+    const safRinsePenalty = constrain((this.safRinseHarshness * safTiltRelief) / (SAF_RINSE_HARSH_TARGET * 3), 0, 1);
     const safRinseCompleteness = constrain(this.safRinseProgress / SAF_RINSE_PROGRESS_GOAL, 0, 1);
     const muddyBias = safRinseCompleteness < 0.35 ? map(safRinseCompleteness, 0, 0.35, 0.25, 0) : 0;
 
@@ -1827,7 +1869,8 @@ class Slide {
     this.observedPositiveCount = 0;
     this.observedNegativeCount = 0;
 
-    const harshPenalty = constrain(this.cvRinseHarshness / (CV_RINSE_HARSH_TARGET * 2), 0, 1);
+    const cvTiltRelief = 1 - (this.cvTiltAvg || 0) * 0.5;
+    const harshPenalty = constrain((this.cvRinseHarshness * cvTiltRelief) / (CV_RINSE_HARSH_TARGET * 3), 0, 1);
 
     for (let c of this.cells) {
       const prepQuality = smearQuality * heatQuality * cvBinding * (0.75 + 0.25 * iodineLock);
@@ -1882,6 +1925,7 @@ class Slide {
     totalScore += this.correctCount;
     totalSlides++;
 
+    this.lastFeedbackParams = { globalExposure, safSoakQuality, safRinsePenalty, safRinseCompleteness };
     this.buildFeedback(globalExposure, safSoakQuality, safRinsePenalty, safRinseCompleteness);
   }
 
@@ -1942,7 +1986,12 @@ class Slide {
     const rinseText = this.cvRinseHarshness > CV_RINSE_HARSH_TARGET
       ? "Rinse was harsh and knocked off some cells."
       : "Gentle rinse kept most cells on the slide.";
-    return `${soakText} ${rinseText}\n\n`;
+    const tiltText = this.cvTiltAvg > 0.45
+      ? "Steep tilt made the rinse slow and gentle."
+      : this.cvTiltAvg > 0.25
+        ? "Moderate tilt softened the rinse."
+        : "Flat rinse stayed fast and harsher.";
+    return `${soakText} ${rinseText} ${tiltText}\n\n`;
   }
 
   getIodineLockQuality() {
@@ -1960,7 +2009,12 @@ class Slide {
     const rinseText = this.ioRinseHarshness > IO_RINSE_HARSH_TARGET
       ? "Iodine rinse was rough and loosened some stain."
       : "Iodine rinse stayed gentle, keeping Gram+ stain locked in.";
-    return `${soakText} ${rinseText}\n\n`;
+    const tiltText = this.ioTiltAvg > 0.45
+      ? "Steep tilt slowed the rinse nicely."
+      : this.ioTiltAvg > 0.25
+        ? "Some tilt eased the rinse."
+        : "Flat rinse ran fast over the smear.";
+    return `${soakText} ${rinseText} ${tiltText}\n\n`;
   }
 
   getSafraninNote(soakQuality, rinsePenalty) {
@@ -2344,14 +2398,15 @@ class ReagentButton {
     this.h = 130;
   }
 
-  draw(isCurrent, isDone) {
+  draw(isCurrent, isDone, highlightAllowed = true) {
     push();
     translate(this.x, this.y);
 
     let enabled = isCurrent && gameState === "stain";
     let hovered = enabled && this.isMouseOver();
+    const highlight = enabled && highlightAllowed;
 
-    if (enabled) {
+    if (highlight) {
       noStroke();
       fill(this.colorHex + "33");
       ellipse(0, 60, this.w, this.h + 30);
