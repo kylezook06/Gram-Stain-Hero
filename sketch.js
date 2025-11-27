@@ -170,7 +170,14 @@ function startNewSlide() {
     { id: "safranin", name: "Safranin", color: COLORS.pink }
   ];
 
-  const offsets = [-270, -90, 90, 270];
+  const baseOffsets = [-270, -90, 90, 270];
+  const offsets = baseOffsets.slice();
+
+  // Starting on the second slide, shuffle the bottle layout to make the flow less obvious.
+  if (totalSlides >= 1) {
+    shuffleArray(offsets);
+  }
+
   for (let i = 0; i < labels.length; i++) {
     reagents.push(
       new ReagentButton(
@@ -182,6 +189,15 @@ function startNewSlide() {
       )
     );
   }
+}
+
+// Fisher-Yates shuffle for small layout arrays
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = floor(random(i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 // ---------- MAIN DRAW ----------

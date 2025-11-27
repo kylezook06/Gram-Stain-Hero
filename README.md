@@ -10,6 +10,7 @@ MicroBuddyz-style Gram staining mini-game built with p5.js. Flood with crystal v
 5. Decolorizer boss-fight: click the Decolorizer bottle to enter a live fade view. Hold on the slide to flow alcohol; Gram– buddies fade fast, Gram+ fade slowly after a grace period. In easy mode a gauge shows the sweet zone; otherwise rely on the visual fade/runoff clarity. Release to lock in your decolor level.
 6. Safranin mini-game: flood/soak quickly, then rinse while tilting by moving the mouse horizontally. More tilt slows the rinse but softens the wash; decolorized areas drink in bright pink, over-rinsing makes Gram– faint, and skipping rinse leaves a muddy red sheen.
 7. Dry & observe: click blot pads to dry the slide (dragging while blotting adds a small smear penalty), then head to the microscope. In the scope view, pick “Mostly Gram+” or “Mostly Gram–”; the call is graded against the colors you produced, while the “true mix” is shown separately for reference.
+8. From slide two onward, the reagent bottle positions shuffle horizontally so you can’t follow the same left-to-right lane every round.
 
 > Looking for the “real game” plan instead of the current prototype? See [`DESIGN.md`](./DESIGN.md) for a step-by-step breakdown of how to turn each protocol step into a skill-based mini-game (smear grid, heat-fix thermometer, live decolor fade, interpretation scoring, and more).
 
