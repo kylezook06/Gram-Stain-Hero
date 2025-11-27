@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MicroBuddyz Gram Stain Hero</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fdf7f2;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: #2d2d2d;
+    }
+    header {
+      margin-top: 16px;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0 0 6px 0;
+      font-size: 28px;
+      letter-spacing: 0.5px;
+    }
+    header p {
+      margin: 0;
+      font-size: 15px;
+      color: #4a4a4a;
+      max-width: 740px;
+    }
+    canvas {
+      display: block;
+      margin: 12px auto 24px auto;
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+      border-radius: 16px;
+    }
+    footer {
+      margin-bottom: 20px;
+      color: #666;
+      font-size: 13px;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+  <script src="sketch.js"></script>
+</head>
+<body>
+  <header>
+    <h1>MicroBuddyz Gram Stain Hero</h1>
+    <p>Step through crystal violet → iodine → a timing-based decolorizer rinse → safranin, then jump to the microscope to see how many MicroBuddyz you stained correctly.</p>
+  </header>
+  <footer>Centered canvas, plushy mixed Gram+/– cells, per-cell scoring, and a friendlier bench-to-scope loop.</footer>
+</body>
+</html>
